@@ -1,0 +1,26 @@
+{
+  "run_id": "6813740a7dcf2f8d",
+  "batch_id": "batch-test-2",
+  "claim_id": "12345",
+  "patient_id": "SHP-MBR-001",
+  "payer_id": "SHP-001",
+  "provider_id": "1487263905",
+  "date_of_service": "2025-08-15",
+  "denial_date": "2025-09-01",
+  "billed_amount": 4250.0,
+  "carc_code": "252",
+  "rarc_code": null,
+  "package_type": "appeal",
+  "recommended_action": "appeal",
+  "denial_category": "prior_auth",
+  "confidence_score": 0.95,
+  "root_cause": "The service was denied because it is not covered under the patient's current benefit plan without prior authorization.",
+  "errors": [
+    "[intake_agent] [data] EOB PDF path 'docs/EOB.pdf' does not exist \u2014 OCR will use mock data"
+  ],
+  "processing_started_at": "2026-04-13T19:40:17.562766",
+  "packaged_at": "2026-04-13T19:40:32.396547",
+  "appeal_deadline": "2026-02-28",
+  "days_until_appeal_deadline": -44,
+  "is_urgent": true
+}

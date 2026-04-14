@@ -1,0 +1,107 @@
+{
+  "claim_id": "22003",
+  "run_id": "473f41b7e28f1a30",
+  "batch_id": "errcheck2",
+  "entries": [
+    {
+      "timestamp": "2026-04-13 19:43:06.008311",
+      "node_name": "intake_agent",
+      "claim_id": "22003",
+      "status": "started",
+      "details": "",
+      "duration_ms": null,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:06.009764",
+      "node_name": "intake_agent",
+      "claim_id": "22003",
+      "status": "completed",
+      "details": "Data errors: 1 | Business flags: 3 | CARC: 16 | Payer: Crestview Health Plans | Specialty: Spine Surgery | Priority: HIGH | Days to deadline: 132 | Requires auth: True | Prior appeals: 0",
+      "duration_ms": 25.5199009552598,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:06.011159",
+      "node_name": "enrichment_agent",
+      "claim_id": "22003",
+      "status": "started",
+      "details": "",
+      "duration_ms": null,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:38.209172",
+      "node_name": "enrichment_agent",
+      "claim_id": "22003",
+      "status": "completed",
+      "details": "Enrichment complete. Patient: OK, Payer: OK, EHR: OK, EOB: OK, SOP: 3 results",
+      "duration_ms": 31375.331601011567,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:38.210600",
+      "node_name": "analysis_agent",
+      "claim_id": "22003",
+      "status": "started",
+      "details": "",
+      "duration_ms": null,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:54.268129",
+      "node_name": "analysis_agent",
+      "claim_id": "22003",
+      "status": "completed",
+      "details": "Action: appeal, Category: prior_auth, Confidence: 0.90",
+      "duration_ms": 15223.710242076777,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:54.270610",
+      "node_name": "appeal_prep_agent",
+      "claim_id": "22003",
+      "status": "started",
+      "details": "",
+      "duration_ms": null,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:59.025535",
+      "node_name": "appeal_prep_agent",
+      "claim_id": "22003",
+      "status": "completed",
+      "details": "Appeal letter generated, 2 supporting docs (1 attached), Deadline: 2026-03-27, Urgent: True",
+      "duration_ms": 4755.016888026148,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:43:59.027150",
+      "node_name": "document_packaging_agent",
+      "claim_id": "22003",
+      "status": "started",
+      "details": "",
+      "duration_ms": null,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-13 19:44:03.388816",
+      "node_name": "document_packaging_agent",
+      "claim_id": "22003",
+      "status": "completed",
+      "details": "Package: appeal, Status: partial, PDFs: 2",
+      "duration_ms": 4361.598781077191,
+      "token_usage": null,
+      "metadata": {}
+    }
+  ]
+}

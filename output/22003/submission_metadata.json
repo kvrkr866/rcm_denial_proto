@@ -1,0 +1,26 @@
+{
+  "run_id": "473f41b7e28f1a30",
+  "batch_id": "errcheck2",
+  "claim_id": "22003",
+  "patient_id": "CRH-MBR-003",
+  "payer_id": "CRH-001",
+  "provider_id": "1023456789",
+  "date_of_service": "2025-09-12",
+  "denial_date": "2025-09-28",
+  "billed_amount": 7500.0,
+  "carc_code": "16",
+  "rarc_code": null,
+  "package_type": "appeal",
+  "recommended_action": "appeal",
+  "denial_category": "prior_auth",
+  "confidence_score": 0.9,
+  "root_cause": "The claim was denied because the service is not covered under the patient's current benefit plan without prior authorization.",
+  "errors": [
+    "[intake_agent] [data] EOB PDF path 'docs/EOB_22003.pdf' does not exist \u2014 OCR will use mock data"
+  ],
+  "processing_started_at": "2026-04-13T19:43:05.910171",
+  "packaged_at": "2026-04-13T19:44:03.371795",
+  "appeal_deadline": "2026-03-27",
+  "days_until_appeal_deadline": -17,
+  "is_urgent": true
+}

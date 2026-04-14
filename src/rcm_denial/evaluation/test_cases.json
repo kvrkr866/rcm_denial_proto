@@ -1,0 +1,37 @@
+[
+  {
+    "claim_id": "CLM-2024-001",
+    "carc_code": "97",
+    "expected_action": "appeal",
+    "expected_category": "prior_auth",
+    "notes": "Prior auth denial — should generate formal appeal with clinical docs"
+  },
+  {
+    "claim_id": "CLM-2024-002",
+    "carc_code": "29",
+    "expected_action": "appeal",
+    "expected_category": "timely_filing",
+    "notes": "Timely filing — should appeal with proof of filing or write off"
+  },
+  {
+    "claim_id": "CLM-2024-003",
+    "carc_code": "50",
+    "expected_action": "appeal",
+    "expected_category": "medical_necessity",
+    "notes": "Medical necessity denial — requires clinical justification appeal"
+  },
+  {
+    "claim_id": "CLM-2024-004",
+    "carc_code": "18",
+    "expected_action": "write_off",
+    "expected_category": "duplicate_claim",
+    "notes": "Duplicate claim — if original was paid, write off"
+  },
+  {
+    "claim_id": "CLM-2024-005",
+    "carc_code": "11",
+    "expected_action": "resubmit",
+    "expected_category": "coding_error",
+    "notes": "Coding error — should correct diagnosis/procedure mismatch and resubmit"
+  }
+]

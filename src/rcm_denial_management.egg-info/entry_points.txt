@@ -1,0 +1,2 @@
+[console_scripts]
+rcm-denial = rcm_denial.main:cli

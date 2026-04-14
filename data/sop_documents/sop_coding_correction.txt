@@ -1,0 +1,50 @@
+TITLE: Coding Error Correction Workflow
+SOURCE: SOP-CODE-004
+CARC_CODES: 4, 11, 16, 22
+PAYER_IDS: ALL
+
+OVERVIEW:
+Coding denials result from incorrect CPT, ICD-10, HCPCS codes, modifiers, or
+diagnosis-procedure mismatches. These are typically corrected via claim resubmission
+rather than a formal appeal. Do not appeal coding errors — correct and resubmit.
+
+STEP-BY-STEP PROCEDURE:
+
+1. IDENTIFY THE CODING ERROR
+   - Review denial reason and specific CARC/RARC codes
+   - Pull original claim and compare to clinical documentation
+   - Have certified coder (CPC or CCS) review if complex
+
+2. COMMON CODING ERRORS AND FIXES
+   CARC 4  (non-covered service): Verify if code is covered; check for bundling issues
+   CARC 11 (diagnosis inconsistent): Match diagnosis to procedure; use most specific ICD-10
+   CARC 16 (billing error): Check all required fields; verify NPI, dates, place of service
+   CARC 22 (COB): Verify primary payer paid; submit with primary EOB attached
+   CARC 97 (bundled): Remove unbundled code; use correct comprehensive code
+
+3. CPT CODE CORRECTIONS
+   - Reference AMA CPT codebook for current year
+   - Check CCI (Correct Coding Initiative) edits for bundling rules
+   - Verify modifiers are appropriate and correctly appended
+   - Common modifiers: -25 (significant separate E&M), -59 (distinct procedure),
+     -76 (repeat procedure), -LT/-RT (laterality)
+
+4. ICD-10 CODE CORRECTIONS
+   - Use most specific code available (to highest specificity)
+   - Verify code is valid for the date of service (codes change annually Oct 1)
+   - Ensure primary diagnosis code supports the procedure performed
+   - Reference CMS ICD-10-CM Official Guidelines
+
+5. RESUBMIT CORRECTED CLAIM
+   - Mark as "corrected claim" — frequency code 7 on UB-04, box 22 on CMS-1500
+   - Include original claim number/ICN in the appropriate field
+   - Attach corrected documentation if coding change required clinical review
+   - Submit within timely filing window from original date of service
+
+6. DOCUMENTATION
+   - Log coding correction in billing system with old/new codes
+   - Note reason for correction and responsible coder
+   - Flag for QA review if pattern of same error identified
+
+DO NOT APPEAL CODING ERRORS — Corrected claim resubmission is the correct path.
+Appeals are for clinical necessity or coverage disputes, not coding mistakes.

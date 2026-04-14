@@ -1,0 +1,6 @@
+claim_id,patient_id,payer_id,provider_id,date_of_service,cpt_codes,diagnosis_codes,denial_reason,carc_code,rarc_code,denial_date,billed_amount,eob_pdf_path
+CLM-2024-001,PAT001,BCBS,PROV-NPI-001,2024-09-20,"27447","M17.11",Prior authorization was not obtained for this surgical procedure,97,N4,2024-10-05,15000.00,
+CLM-2024-002,PAT002,AETNA,PROV-NPI-002,2024-08-14,"43239","K21.0",Claim submitted after timely filing limit of 180 days,29,,2024-10-15,3200.00,
+CLM-2024-003,PAT003,MEDICARE,PROV-NPI-003,2024-07-05,"93000","R00.0",Service not deemed medically necessary based on submitted diagnosis,50,N115,2024-07-20,450.00,
+CLM-2024-004,PAT001,BCBS,PROV-NPI-001,2024-09-20,"27447","M17.11",Duplicate claim - payment already issued for this service on this date,18,M86,2024-10-10,15000.00,
+CLM-2024-005,PAT002,CIGNA,PROV-NPI-004,2024-06-12,"99214","Z00.00",Diagnosis code does not support the procedure billed - coding inconsistency,11,N56,2024-07-01,285.00,

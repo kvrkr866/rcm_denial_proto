@@ -1,0 +1,52 @@
+TITLE: Timely Filing Appeal Procedure
+SOURCE: SOP-TF-001
+CARC_CODES: 29
+PAYER_IDS: ALL
+
+OVERVIEW:
+Timely filing denials (CARC 29) occur when a claim is submitted after the payer's filing deadline.
+Most commercial payers require submission within 90-365 days of the date of service.
+Medicare requires submission within 12 months (1 calendar year) of the date of service.
+
+STEP-BY-STEP PROCEDURE:
+
+1. VERIFY ORIGINAL SUBMISSION DATE
+   - Pull clearinghouse transmission report showing original submission timestamp
+   - Check electronic remittance advice (ERA) or 277 acknowledgment for initial receipt date
+   - Review billing system claim history log
+
+2. GATHER PROOF OF TIMELY FILING
+   Acceptable proof includes:
+   - Electronic clearinghouse transmission confirmation report with date/time stamp
+   - 277 Claim Acknowledgment with payer receipt date
+   - Certified mail receipt if submitted by paper
+   - 835 Electronic Remittance Advice showing prior adjudication
+
+3. PREPARE APPEAL DOCUMENTATION
+   Required documents:
+   - Appeal letter (see template TEMP-TF-001)
+   - Proof of timely filing (from step 2)
+   - Copy of original denied claim (UB-04 or CMS-1500)
+   - Copy of original EOB
+
+4. SUBMIT APPEAL
+   - Submit within payer's appeal deadline (typically 60-180 days from denial)
+   - Address to payer appeals department per contract
+   - Keep copy of all submitted materials
+   - Log submission in billing system with tracking number
+
+5. IF NO PROOF AVAILABLE
+   - Escalate to billing supervisor for write-off determination
+   - Document reason for late filing in claim notes
+   - Consider preventive measures: set filing deadline alerts in billing system
+
+KEY DEADLINES:
+- Medicare: 12 months from DOS for initial claim; 120 days from denial for redetermination
+- BCBS: 365 days from DOS; 180 days from denial for Level 1 appeal
+- Aetna: 180 days from DOS for out-of-network; 180 days from denial for appeal
+- Cigna: 180 days from DOS; 180 days from denial for appeal
+
+PREVENTION:
+- Configure billing system alerts at 60-day and 90-day filing milestones
+- Run weekly unbilled claims aging report
+- Assign filing deadline tracking to dedicated staff

@@ -1,0 +1,32 @@
+{
+  "carc_codes": {
+    "1":   { "description": "Deductible amount. The amount applied to the deductible." },
+    "4":   { "description": "The service/equipment/drug is not covered by the plan. However, as a courtesy we are notifying you." },
+    "11":  { "description": "The diagnosis is inconsistent with the procedure. At least one Remark Code must be provided." },
+    "16":  { "description": "Claim/service lacks information or has submission/billing error(s). Usage: Do not use this code for claims attachment(s)/other documentation." },
+    "18":  { "description": "Exact duplicate claim/service." },
+    "22":  { "description": "This care may be covered by another payer per coordination of benefits." },
+    "27":  { "description": "Expenses incurred after coverage terminated." },
+    "29":  { "description": "The time limit for filing has expired." },
+    "50":  { "description": "These are non-covered services because this is not deemed a 'medical necessity' by the payer." },
+    "55":  { "description": "Procedure/treatment/drug is deemed experimental/investigational by the payer." },
+    "96":  { "description": "Non-covered charge(s). At least one Remark Code must be provided." },
+    "97":  { "description": "The benefit for this service is included in the payment/allowance for another service/procedure that has already been adjudicated." },
+    "167": { "description": "This (these) diagnosis(es) is (are) not covered. At least one Remark Code must be provided." },
+    "170": { "description": "Payment is denied when performed/billed by this type of provider." },
+    "B7":  { "description": "This provider was not certified/eligible to be paid for this procedure/service on this date of service." }
+  },
+  "rarc_codes": {
+    "M86":  { "description": "Service denied because payment already made for same/similar procedure within set time frame." },
+    "N4":   { "description": "Missing/incomplete/invalid prior authorization." },
+    "N20":  { "description": "Alert: Missing/incomplete/invalid procedure code." },
+    "N56":  { "description": "Procedure code billed is not correct/valid for the services billed or the date of service billed." },
+    "N104": { "description": "This claim/service is not payable under our claim's processing system. Please resubmit to the correct payer/processor." },
+    "N115": { "description": "This decision was based on a Local Coverage Determination (LCD). An LCD provides a guide to assist in determining whether a particular item or service is covered." },
+    "N130": { "description": "Alert: Missing/incomplete/invalid type of bill." },
+    "N362": { "description": "Alert: At least one Remark Code must be provided." },
+    "N479": { "description": "Incomplete/invalid/missing prior authorization number." },
+    "MA04": { "description": "Secondary payment cannot be considered without the identity of or payment information from the primary payer." },
+    "MA130":{ "description": "Your claim contains incomplete and/or invalid information, and no appeal rights are afforded because the claim is unprocessable." }
+  }
+}

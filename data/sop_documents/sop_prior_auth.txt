@@ -1,0 +1,45 @@
+TITLE: Prior Authorization Appeal Procedure
+SOURCE: SOP-AUTH-002
+CARC_CODES: 97, 96, 167, 4
+PAYER_IDS: BCBS, AETNA, CIGNA
+
+OVERVIEW:
+Prior authorization denials occur when a service requiring pre-approval was performed
+without obtaining authorization, or when the authorization was not properly referenced
+on the claim. CARC 97 indicates the benefit is included in another adjudicated service.
+
+STEP-BY-STEP PROCEDURE:
+
+1. VERIFY AUTHORIZATION STATUS
+   - Check EHR prior auth module for existing authorization
+   - Verify authorization covers the exact CPT code(s) billed
+   - Confirm authorization was active on the date of service
+   - Verify correct authorization number was listed on the claim
+
+2. IF AUTHORIZATION EXISTS BUT WAS NOT CITED
+   - Correct and resubmit claim with authorization number in field 23 (CMS-1500) or FL-63 (UB-04)
+   - Include authorization approval letter as attachment
+   - This is a corrected claim, not an appeal
+
+3. IF AUTHORIZATION WAS NOT OBTAINED
+   a) Submit retrospective/retro-authorization request immediately
+   b) Simultaneously prepare appeal letter stating clinical necessity
+
+4. CLINICAL DOCUMENTATION REQUIRED FOR APPEAL
+   - Complete physician progress notes
+   - Diagnosis justification and history
+   - Failed conservative treatment documentation
+   - Applicable clinical guidelines
+   - Letter of Medical Necessity (physician-signed, on letterhead)
+
+5. ESCALATION
+   - If Level 1 appeal denied: file Level 2 appeal
+   - Consider peer-to-peer review request with payer medical director
+
+REQUIRED DOCUMENTS CHECKLIST:
+[ ] Appeal letter (physician co-signed preferred)
+[ ] Authorization approval letter (if exists)
+[ ] Encounter note / operative report
+[ ] Letter of Medical Necessity
+[ ] Clinical guidelines supporting procedure
+[ ] Original EOB

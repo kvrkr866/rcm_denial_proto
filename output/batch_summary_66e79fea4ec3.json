@@ -1,0 +1,59 @@
+{
+  "batch_id": "66e79fea4ec3",
+  "input_csv": "data/sample_denials.csv",
+  "total_claims": 5,
+  "completed": 0,
+  "partial": 0,
+  "failed": 5,
+  "skipped": 0,
+  "claim_results": [
+    {
+      "claim_id": "CLM-2024-001",
+      "status": "failed",
+      "package_type": "failed",
+      "output_dir": "",
+      "errors": [],
+      "duration_ms": 26632.14657001663,
+      "processed_at": "2026-04-13 17:26:40.441598"
+    },
+    {
+      "claim_id": "CLM-2024-002",
+      "status": "failed",
+      "package_type": "failed",
+      "output_dir": "",
+      "errors": [],
+      "duration_ms": 28.601511963643134,
+      "processed_at": "2026-04-13 17:26:40.473283"
+    },
+    {
+      "claim_id": "CLM-2024-003",
+      "status": "failed",
+      "package_type": "failed",
+      "output_dir": "",
+      "errors": [],
+      "duration_ms": 30.26771906297654,
+      "processed_at": "2026-04-13 17:26:40.504952"
+    },
+    {
+      "claim_id": "CLM-2024-004",
+      "status": "failed",
+      "package_type": "failed",
+      "output_dir": "",
+      "errors": [],
+      "duration_ms": 26.301678037270904,
+      "processed_at": "2026-04-13 17:26:40.534568"
+    },
+    {
+      "claim_id": "CLM-2024-005",
+      "status": "failed",
+      "package_type": "failed",
+      "output_dir": "",
+      "errors": [],
+      "duration_ms": 32.59613807313144,
+      "processed_at": "2026-04-13 17:26:40.569448"
+    }
+  ],
+  "started_at": "2026-04-13 17:26:13.804614",
+  "completed_at": "2026-04-13 17:26:40.571386",
+  "total_duration_ms": 26766.773071023636
+}

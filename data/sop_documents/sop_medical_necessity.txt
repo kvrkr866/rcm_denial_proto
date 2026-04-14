@@ -1,0 +1,54 @@
+TITLE: Medical Necessity Documentation and Appeal Guide
+SOURCE: SOP-MN-003
+CARC_CODES: 50, 55, 167, 170
+PAYER_IDS: MEDICARE, BCBS, AETNA, CIGNA
+
+OVERVIEW:
+Medical necessity denials indicate the payer determined the service was not medically
+necessary based on submitted information. These require strong clinical documentation
+and often a physician-signed appeal letter citing clinical guidelines.
+
+CLINICAL DOCUMENTATION REQUIREMENTS:
+
+1. PHYSICIAN DOCUMENTATION
+   - Complete encounter note describing patient's chief complaint
+   - Relevant medical history and physical examination findings
+   - Assessment and plan clearly linking diagnosis to the procedure
+   - Documentation of failed conservative/alternative treatments
+   - Physician attestation of medical necessity
+
+2. DIAGNOSTIC SUPPORT
+   - Relevant lab results, imaging reports, pathology reports
+   - Results must directly support the diagnosis codes billed
+   - Include dates and interpreting physician names
+
+3. TREATMENT HISTORY
+   - Document prior treatment attempts (medications, physical therapy, etc.)
+   - Show progression of condition requiring the billed service
+   - Reference time period of conservative treatment failure
+
+4. CLINICAL GUIDELINES REFERENCES
+   For Medicare: Reference applicable LCD (Local Coverage Determination)
+   - Find applicable LCD at: cms.gov/medicare-coverage-database
+   For Commercial Payers: Reference payer's clinical coverage policy
+
+5. LETTER OF MEDICAL NECESSITY
+   Required elements:
+   - Patient name and member ID
+   - Date of service and procedure(s)
+   - Primary diagnosis and supporting diagnoses
+   - Clinical rationale for the specific procedure
+   - Why alternative treatments were insufficient
+   - Physician signature and NPI
+
+APPEAL STRUCTURE:
+Paragraph 1: Formal request for reconsideration
+Paragraph 2: Brief clinical summary
+Paragraph 3: Clinical justification with guideline citations
+Paragraph 4: Documentation inventory
+Paragraph 5: Request for reversal and expedited review
+
+MEDICARE-SPECIFIC GUIDANCE:
+- Reference CMS IOM Publication 100-02, Chapter 15 for covered services
+- For inpatient denials, reference Two-Midnight Rule (42 CFR 412.3)
+- File Redetermination within 120 days of initial denial notice

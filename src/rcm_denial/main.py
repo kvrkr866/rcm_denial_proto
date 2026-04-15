@@ -2135,21 +2135,25 @@ def evals_quality_signals_cmd():
 
 @cli.command("web")
 @click.option("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
-@click.option("--port", default=8888, type=int, help="Port (default: 8888)")
+@click.option("--port", default=None, type=int, help="Port (default: WEB_PORT from .env, or 8080)")
 @click.option("--reload", is_flag=True, default=False, help="Auto-reload on code changes (dev)")
 def web_cmd(host: str, port: int, reload: bool):
     """
     Launch the NiceGUI web interface.
 
-    Opens a browser-based UI for processing claims, reviewing the queue,
-    viewing statistics, and running evaluations. All functionality calls
-    the same backend as the CLI — no separate server needed.
+    Port is configurable via WEB_PORT in .env or --port flag.
+    The --port flag overrides the .env setting.
 
     Examples:\n
         rcm-denial web\n
         rcm-denial web --port 3000\n
         rcm-denial web --reload      (dev mode with auto-reload)
     """
+    from rcm_denial.config.settings import settings
+
+    if port is None:
+        port = settings.web_port
+
     try:
         from rcm_denial.web.app import start
     except ImportError:

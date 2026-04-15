@@ -66,17 +66,18 @@ rcm-denial --help
 Share your local machine with a public URL. Best for quick demos to 1-5 people.
 
 ```bash
-# Terminal 1: Start the app
-rcm-denial web --port 8080
+# Terminal 1: Start the app (port from WEB_PORT in .env, default 8080)
+rcm-denial web
 
 # Terminal 2: Expose via ngrok
 # Install: https://ngrok.com/download (free account)
-ngrok http 8080
+ngrok http 8080    # match the WEB_PORT from your .env
 ```
 
 ngrok gives you a URL like `https://abc123.ngrok-free.app` — share this with your audience.
 
 **Important:**
+- Ports are configurable in `.env`: `WEB_PORT=8080`, `GRAFANA_PORT=3000`
 - Enable auth: set `WEB_AUTH_ENABLED=true` and `WEB_AUTH_USERS=demo:yourpassword` in `.env`
 - Free ngrok: URL changes each restart, 40 connections/min limit
 - Paid ngrok ($8/mo): custom subdomain, no rate limit
@@ -234,13 +235,14 @@ gcloud run deploy rcm-denial \
 
 | # | Item | Command |
 |---|------|---------|
-| 1 | Auth enabled | Set `WEB_AUTH_ENABLED=true` in .env |
-| 2 | Strong password | Set `WEB_AUTH_USERS=admin:strong-password` |
-| 3 | Session secret | Set `WEB_AUTH_SECRET=<random-64-char-string>` |
-| 4 | OpenAI key | Set `OPENAI_API_KEY=sk-...` |
-| 5 | SOP collections built | `rcm-denial init --verify` (or click "Init SOPs" in web UI) |
-| 6 | Demo data loaded | Upload `data/demo_denials.csv` via web UI |
-| 7 | Test the URL | Open in incognito browser, login, process one claim |
+| 1 | Ports configured | Set `WEB_PORT=8080` and `GRAFANA_PORT=3000` in .env (or use defaults) |
+| 2 | Auth enabled | Set `WEB_AUTH_ENABLED=true` in .env |
+| 3 | Strong password | Set `WEB_AUTH_USERS=admin:strong-password` |
+| 4 | Session secret | Set `WEB_AUTH_SECRET=<random-64-char-string>` |
+| 5 | OpenAI key | Set `OPENAI_API_KEY=sk-...` |
+| 6 | SOP collections built | `rcm-denial init --verify` (or click "Init SOPs" in web UI) |
+| 7 | Demo data loaded | Upload `data/demo_denials.csv` via web UI |
+| 8 | Test the URL | Open in incognito browser, login, process one claim |
 
 ---
 

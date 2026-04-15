@@ -1089,7 +1089,7 @@ rcm-denial evals quality-signals
 ### Web UI & Tests
 
 ```
-rcm-denial web               --host TEXT --port INTEGER --reload
+rcm-denial web               --host TEXT --port INTEGER (default: WEB_PORT from .env) --reload
 rcm-denial run-tests         -v/--verbose
 ```
 
@@ -1162,10 +1162,12 @@ rcm-denial run-tests         -v/--verbose
 | `METRICS_EXPORT_AFTER_BATCH` | `true` | Auto-write .prom file after batch |
 | `PROMETHEUS_PUSHGATEWAY_URL` | -- | Pushgateway URL (empty = disabled) |
 
-### Web UI Auth
+### Web UI & Ports
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `WEB_PORT` | `8080` | NiceGUI web UI port (`--port` flag overrides) |
+| `GRAFANA_PORT` | `3000` | Grafana dashboard port (used in docker-compose) |
 | `WEB_AUTH_ENABLED` | `false` | Enable login |
 | `WEB_AUTH_SECRET` | `change-me-in-production` | Session encryption key |
 | `WEB_AUTH_USERS` | `admin:admin` | Comma-separated user:password pairs |

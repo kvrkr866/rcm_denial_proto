@@ -179,6 +179,14 @@ class Settings(BaseSettings):
         default="admin:admin",
         description="Comma-separated user:password pairs (e.g. 'admin:admin,reviewer:pass123')",
     )
+    web_port: int = Field(
+        default=8080,
+        description="NiceGUI web UI port",
+    )
+    grafana_port: int = Field(
+        default=3000,
+        description="Grafana dashboard port (used in docker-compose)",
+    )
 
     # ------------------------------------------------------------------ #
     # Batch processing

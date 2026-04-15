@@ -380,8 +380,9 @@ rcm-denial stats --export-metrics --push-gateway http://localhost:9091
 rcm-denial evals run
 rcm-denial evals quality-signals
 
-# Web UI
-rcm-denial web --port 8080
+# Web UI (port from WEB_PORT in .env, or override with --port)
+rcm-denial web                     # uses WEB_PORT from .env (default 8080)
+rcm-denial web --port 9090         # override
 
 # Database
 rcm-denial db info
@@ -400,6 +401,8 @@ Copy `.env.example` to `.env` and set your values. Key variables:
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | -- | Required for LLM features |
 | `OPENAI_MODEL` | `gpt-4o` | LLM model |
+| `WEB_PORT` | `8080` | NiceGUI web UI port (also via `--port` flag) |
+| `GRAFANA_PORT` | `3000` | Grafana dashboard port (docker-compose) |
 | `WEB_AUTH_ENABLED` | `false` | Enable login for web UI |
 | `WEB_AUTH_USERS` | `admin:admin` | Login credentials |
 | `DATABASE_TYPE` | `sqlite` | `sqlite` or `postgresql` |

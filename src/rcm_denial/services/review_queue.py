@@ -252,6 +252,7 @@ def get_queue(
     batch_id: str = "",
     status: str = "",
     limit: int = 100,
+    offset: int = 0,
 ) -> list[dict]:
     """Returns queue items, optionally filtered by batch and/or status."""
     _init_queue_db()
@@ -265,7 +266,7 @@ def get_queue(
         params.append(status)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    params.append(limit)
+    params.extend([limit, offset])
 
     with sqlite3.connect(_get_db_path()) as conn:
         conn.row_factory = sqlite3.Row
@@ -281,11 +282,30 @@ def get_queue(
             FROM human_review_queue
             {where}
             ORDER BY is_urgent DESC, billed_amount DESC, created_at ASC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
             params,
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_queue_count(batch_id: str = "", status: str = "") -> int:
+    """Returns total count of queue items matching filters."""
+    _init_queue_db()
+    conditions = []
+    params: list = []
+    if batch_id:
+        conditions.append("batch_id = ?")
+        params.append(batch_id)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    with sqlite3.connect(_get_db_path()) as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM human_review_queue {where}", params
+        ).fetchone()
+    return row[0] if row else 0
 
 
 def get_queue_item(run_id: str) -> dict | None:

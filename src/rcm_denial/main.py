@@ -2130,6 +2130,44 @@ def evals_quality_signals_cmd():
 
 
 # ------------------------------------------------------------------ #
+# Command: web  (NiceGUI web interface)
+# ------------------------------------------------------------------ #
+
+@cli.command("web")
+@click.option("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+@click.option("--port", default=8080, type=int, help="Port (default: 8080)")
+@click.option("--reload", is_flag=True, default=False, help="Auto-reload on code changes (dev)")
+def web_cmd(host: str, port: int, reload: bool):
+    """
+    Launch the NiceGUI web interface.
+
+    Opens a browser-based UI for processing claims, reviewing the queue,
+    viewing statistics, and running evaluations. All functionality calls
+    the same backend as the CLI — no separate server needed.
+
+    Examples:\n
+        rcm-denial web\n
+        rcm-denial web --port 3000\n
+        rcm-denial web --reload      (dev mode with auto-reload)
+    """
+    try:
+        from rcm_denial.web.app import start
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] NiceGUI is not installed.\n"
+            "Install it with:  [cyan]pip install nicegui[/cyan]"
+        )
+        sys.exit(1)
+
+    console.print(Panel.fit(
+        f"[bold blue]RCM Denial Management — Web UI[/bold blue]\n"
+        f"[dim]http://{host}:{port}[/dim]",
+        border_style="blue",
+    ))
+    start(host=host, port=port, reload=reload)
+
+
+# ------------------------------------------------------------------ #
 # Command: run-tests
 # ------------------------------------------------------------------ #
 

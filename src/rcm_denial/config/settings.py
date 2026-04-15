@@ -137,6 +137,50 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------ #
+    # LLM rate limiting
+    # ------------------------------------------------------------------ #
+    llm_requests_per_minute: int = Field(
+        default=30, ge=1,
+        description="Max LLM API calls per minute (token bucket rate)",
+    )
+    llm_burst_size: int = Field(
+        default=5, ge=1,
+        description="Max burst of rapid LLM calls before throttling kicks in",
+    )
+
+    # ------------------------------------------------------------------ #
+    # OCR — PyMuPDF + Tesseract
+    # ------------------------------------------------------------------ #
+    ocr_pymupdf_min_chars: int = Field(
+        default=50,
+        description="Min chars from PyMuPDF text extraction before falling back to Tesseract OCR",
+    )
+
+    # ------------------------------------------------------------------ #
+    # Checkpointing (error recovery)
+    # ------------------------------------------------------------------ #
+    enable_checkpointing: bool = Field(
+        default=True,
+        description="Save per-node state checkpoints for crash recovery in batch runs",
+    )
+
+    # ------------------------------------------------------------------ #
+    # Web UI authentication
+    # ------------------------------------------------------------------ #
+    web_auth_enabled: bool = Field(
+        default=False,
+        description="Enable login for web UI (set True for any non-local deployment)",
+    )
+    web_auth_secret: str = Field(
+        default="change-me-in-production",
+        description="Secret key for NiceGUI session storage (change in production!)",
+    )
+    web_auth_users: str = Field(
+        default="admin:admin",
+        description="Comma-separated user:password pairs (e.g. 'admin:admin,reviewer:pass123')",
+    )
+
+    # ------------------------------------------------------------------ #
     # Batch processing
     # ------------------------------------------------------------------ #
     batch_max_retries: int = Field(default=3, ge=1, le=10)

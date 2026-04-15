@@ -58,7 +58,35 @@ logger = get_logger(__name__)
 def _wrap_node(agent_fn):
     def wrapped(state_dict: dict) -> dict:
         state = DenialWorkflowState(**state_dict)
+        node_name = agent_fn.__name__
+
+        # Checkpoint: skip if this node was already completed (crash recovery)
+        try:
+            from rcm_denial.services.checkpoint_service import should_skip_node, get_checkpoint_state
+            if should_skip_node(state.run_id, state.claim.claim_id, node_name):
+                saved_json = get_checkpoint_state(state.run_id, state.claim.claim_id)
+                if saved_json:
+                    logger.info("Resuming from checkpoint — skipping node",
+                                node=node_name, claim_id=state.claim.claim_id)
+                    return DenialWorkflowState.model_validate_json(saved_json).model_dump()
+        except Exception:
+            pass  # checkpointing is non-fatal
+
         updated_state = agent_fn(state)
+
+        # Checkpoint: save state after successful node completion
+        try:
+            from rcm_denial.services.checkpoint_service import save_checkpoint
+            save_checkpoint(
+                run_id=state.run_id,
+                claim_id=state.claim.claim_id,
+                batch_id=state.batch_id,
+                node_name=node_name,
+                state_json=updated_state.model_dump_json(),
+            )
+        except Exception:
+            pass  # checkpointing is non-fatal
+
         return updated_state.model_dump()
     wrapped.__name__ = agent_fn.__name__
     return wrapped

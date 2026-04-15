@@ -206,6 +206,13 @@ Evaluate and respond with an EvidenceCheckResult containing:
     reraise=True,
 )
 def _run_llm_evidence_check(prompt: str, state: DenialWorkflowState) -> EvidenceCheckResult:
+    # Rate-limit before every LLM call to prevent 429 errors
+    try:
+        from rcm_denial.services.rate_limiter import acquire
+        acquire()
+    except Exception:
+        pass
+
     try:
         from langchain_openai import ChatOpenAI
         from rcm_denial.config.settings import settings

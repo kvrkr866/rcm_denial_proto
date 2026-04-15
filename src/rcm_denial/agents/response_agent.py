@@ -299,6 +299,12 @@ def _run_llm_response(
         def _invoke_tracked(sl, sub_prompt: str):
             """Invoke structured_llm and capture token counts."""
             nonlocal _total_input, _total_output
+            # Rate-limit before every LLM call
+            try:
+                from rcm_denial.services.rate_limiter import acquire
+                acquire()
+            except Exception:
+                pass
             try:
                 from langchain_community.callbacks import get_openai_callback
                 with get_openai_callback() as cb:

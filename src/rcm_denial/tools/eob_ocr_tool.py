@@ -62,42 +62,96 @@ _DENIAL_REMARK_PATTERNS = [
 ]
 
 
+def _extract_with_pymupdf(pdf_path: Path) -> tuple[str, float] | None:
+    """
+    Try extracting text from a digital (text-layer) PDF using PyMuPDF.
+
+    Returns (text, confidence) if enough text is found, else None
+    to signal fallback to Tesseract OCR.
+    """
+    try:
+        import fitz  # PyMuPDF
+
+        from rcm_denial.config.settings import settings
+        min_chars = settings.ocr_pymupdf_min_chars
+
+        doc = fitz.open(str(pdf_path))
+        pages_text = []
+        for page in doc:
+            pages_text.append(page.get_text())
+        doc.close()
+
+        full_text = "\n".join(pages_text).strip()
+        if len(full_text) >= min_chars:
+            logger.info(
+                "PyMuPDF text extraction succeeded",
+                pdf_path=str(pdf_path),
+                chars=len(full_text),
+            )
+            return full_text, 0.95   # high confidence for digital text
+        return None
+
+    except ImportError:
+        return None
+    except Exception as exc:
+        logger.debug("PyMuPDF extraction failed, will try Tesseract", error=str(exc))
+        return None
+
+
+def _extract_with_tesseract(pdf_path: Path, dpi: int = 300) -> tuple[str, float]:
+    """
+    Extract text from a scanned PDF using Tesseract OCR + pdf2image.
+    """
+    from pdf2image import convert_from_path
+    import pytesseract
+    from rcm_denial.config.settings import settings
+
+    pytesseract.pytesseract.tesseract_cmd = settings.tesseract_cmd
+    images = convert_from_path(str(pdf_path), dpi=dpi)
+    pages_text = []
+    confidences = []
+
+    for img in images:
+        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+        text = pytesseract.image_to_string(img)
+        pages_text.append(text)
+
+        valid_conf = [c for c in data["conf"] if c != -1]
+        if valid_conf:
+            confidences.append(sum(valid_conf) / len(valid_conf) / 100.0)
+
+    full_text = "\n".join(pages_text)
+    avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    return full_text, avg_confidence
+
+
 def extract_text_from_pdf(pdf_path: Path, dpi: int = 300) -> tuple[str, float]:
     """
-    Extracts text from a PDF using pytesseract + pdf2image.
+    Extracts text from a PDF.
 
-    Real integration swap: replace this function body with:
-        import boto3
-        client = boto3.client('textract', region_name=settings.aws_region)
-        response = client.detect_document_text(Document={...})
-        # parse response['Blocks'] for LINE text
+    Strategy:
+      1. Try PyMuPDF first (instant, high accuracy for digital PDFs)
+      2. Fall back to Tesseract OCR (for scanned/image-only PDFs)
+      3. Fall back to mock text (if OCR deps not installed)
 
     Returns:
         Tuple of (extracted_text, confidence_score 0-1)
     """
+    # Strategy 1: PyMuPDF for digital PDFs
+    pymupdf_result = _extract_with_pymupdf(pdf_path)
+    if pymupdf_result is not None:
+        return pymupdf_result
+
+    # Strategy 2: Tesseract OCR for scanned PDFs
     try:
-        from pdf2image import convert_from_path
-        import pytesseract
-        from rcm_denial.config.settings import settings
-
-        pytesseract.pytesseract.tesseract_cmd = settings.tesseract_cmd
-        images = convert_from_path(str(pdf_path), dpi=dpi)
-        pages_text = []
-        confidences = []
-
-        for img in images:
-            data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-            text = pytesseract.image_to_string(img)
-            pages_text.append(text)
-
-            # Average word-level confidence (filter -1 values)
-            valid_conf = [c for c in data["conf"] if c != -1]
-            if valid_conf:
-                confidences.append(sum(valid_conf) / len(valid_conf) / 100.0)
-
-        full_text = "\n".join(pages_text)
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        return full_text, avg_confidence
+        text, confidence = _extract_with_tesseract(pdf_path, dpi=dpi)
+        logger.info(
+            "Tesseract OCR extraction",
+            pdf_path=str(pdf_path),
+            chars=len(text),
+            confidence=round(confidence, 3),
+        )
+        return text, confidence
 
     except ImportError as exc:
         logger.warning("OCR dependencies not installed — using mock text", error=str(exc))

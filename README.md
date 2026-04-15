@@ -11,9 +11,9 @@ A production-grade, multi-agent AI system built with **LangGraph** that automate
 ## Table of Contents
 
 1. [Features at a Glance](#features-at-a-glance)
-2. [Deployment and Setup](#deployment-and-setup)
+2. [Deployment and Setup](#deployment-and-setup) (includes Web UI setup)
 3. [Running the System — End-to-End Workflow](#running-the-system--end-to-end-workflow)
-4. [Complete CLI Reference (All Commands and Options)](#complete-cli-reference-all-commands-and-options)
+4. [Complete CLI Reference (All Commands and Options)](#complete-cli-reference-all-commands-and-options) (includes `rcm-denial web`)
 5. [Architecture Overview](#architecture-overview)
 6. [Project Structure](#project-structure)
 7. [Programmatic API](#programmatic-api)
@@ -78,9 +78,138 @@ A production-grade, multi-agent AI system built with **LangGraph** that automate
 - **Golden dataset** — 14 labeled cases covering all 7 denial categories and all 4 actions for regression testing
 - **LLM-as-judge evaluation** — 5-metric composite scoring framework
 
+### Web UI (NiceGUI)
+- **Browser-based interface** — 5-page NiceGUI app for demos and daily use; optional, not required for CLI
+- **Real-time pipeline stepper** — visual stage-by-stage progress indicators while processing claims
+- **Review queue with action buttons** — Approve, Re-route, Override, Write-off with dialog modals
+- **Stats dashboard** — pipeline results, LLM cost breakdown, review queue, write-off impact, eval signals
+- **Evals page** — golden dataset regression runner, quality signals, single-claim criteria checker
+- **Fully separated from backend** — web UI is a thin layer calling the same Python APIs as the CLI; swap for React/Vue later without backend changes
+
 ---
 
 ## Deployment and Setup
+
+There are two deployment methods: **Docker (recommended)** or **local installation**.
+
+### Option A — Docker Deployment (Recommended)
+
+Docker bundles everything — Python, Tesseract OCR, all dependencies — into a single container. No system-level installs needed.
+
+**Prerequisites:** Docker and Docker Compose installed.
+
+#### Quick Start (app + full observability stack)
+
+```bash
+# 1. Clone and configure
+git clone <repo-url>
+cd rcm_denial_proto
+cp .env.example .env
+# Edit .env — set OPENAI_API_KEY at minimum
+
+# 2. Launch everything (app + Prometheus + Grafana + Loki)
+docker compose up -d
+
+# Web UI:     http://localhost:8080
+# Grafana:    http://localhost:3000  (admin/admin)
+# Prometheus: http://localhost:9090
+```
+
+#### App only (no monitoring)
+
+```bash
+docker compose up -d app
+```
+
+#### Run CLI commands inside the container
+
+```bash
+# Process a batch
+docker compose exec app rcm-denial process-batch /app/data/sample_denials.csv
+
+# Initialize SOP knowledge base
+docker compose exec app rcm-denial init --verify
+
+# View stats
+docker compose exec app rcm-denial stats
+
+# Run tests
+docker compose exec app rcm-denial run-tests
+
+# Review queue
+docker compose exec app rcm-denial review list --status pending
+
+# Any CLI command works — just prefix with: docker compose exec app
+```
+
+#### Build the image manually
+
+```bash
+# Build
+docker build -t rcm-denial .
+
+# Run web UI
+docker run -p 8080:8080 -v $(pwd)/.env:/app/.env:ro rcm-denial
+
+# Run a CLI command
+docker run -v $(pwd)/.env:/app/.env:ro rcm-denial process-batch /app/data/sample_denials.csv
+
+# Run with output and logs mounted to host
+docker run -p 8080:8080 \
+  -v $(pwd)/.env:/app/.env:ro \
+  -v $(pwd)/output:/app/output \
+  -v $(pwd)/logs:/app/logs \
+  -v $(pwd)/data/sop_documents:/app/data/sop_documents:ro \
+  rcm-denial
+```
+
+#### Docker + PostgreSQL (production)
+
+```bash
+# 1. Uncomment the postgres service in docker-compose.yml
+
+# 2. Update .env:
+#    DATABASE_TYPE=postgresql
+#    DATABASE_URL=postgresql://rcm:rcm_secure_password@postgres:5432/rcm_denial
+
+# 3. Start the stack
+docker compose up -d
+
+# 4. Create schema
+docker compose exec app rcm-denial db export-schema | \
+  docker compose exec -T postgres psql -U rcm -d rcm_denial
+
+# 5. Migrate data (if upgrading from SQLite)
+docker compose exec app rcm-denial db migrate-to-postgres
+
+# 6. Verify
+docker compose exec app rcm-denial db info
+```
+
+#### Docker container ports
+
+| Port | Service | Description |
+|------|---------|-------------|
+| 8080 | App (Web UI) | NiceGUI web interface |
+| 9090 | Prometheus | Metrics storage and queries |
+| 9091 | Pushgateway | Batch metrics receiver |
+| 3000 | Grafana | Dashboards (admin/admin) |
+| 3100 | Loki | Log aggregation |
+| 5432 | PostgreSQL | Production database (optional, uncomment in docker-compose.yml) |
+
+#### Stop and clean up
+
+```bash
+# Stop all services
+docker compose down
+
+# Stop and remove all data volumes
+docker compose down -v
+```
+
+---
+
+### Option B — Local Installation (without Docker)
 
 ### Prerequisites
 
@@ -126,8 +255,14 @@ source .venv/bin/activate          # Windows WSL: same command
 ### Step 3 — Install Python Dependencies
 
 ```bash
-# Install the package in editable mode with dev dependencies
+# Core + dev tools (CLI only, no web UI)
 pip install -e ".[dev]"
+
+# Core + dev + web UI
+pip install -e ".[all]"
+
+# Or install web UI separately at any time
+pip install nicegui
 ```
 
 This installs all required packages including:
@@ -139,6 +274,7 @@ This installs all required packages including:
 - `reportlab`, `pypdf` — PDF generation
 - `pytesseract`, `pdf2image`, `Pillow` — OCR
 - `rich`, `click` — CLI interface
+- `nicegui` — web UI (optional, installed with `.[web]` or `.[all]`)
 - `pytest`, `ruff`, `mypy` — dev tools
 
 ### Step 4 — Configure Environment Variables
@@ -215,7 +351,33 @@ docker compose -f data/observability/docker-compose.yml up -d
 
 Grafana auto-provisions the Prometheus datasource and the RCM Denial dashboard on startup.
 
-### Step 8 — (Optional) Switch to PostgreSQL for Production
+### Step 8 — (Optional) Launch Web UI
+
+The system includes a browser-based UI built with NiceGUI. It is a **thin presentation layer** — all functionality calls the same backend as the CLI. The web UI is optional; the CLI works independently.
+
+```bash
+# Install NiceGUI (if not already done via pip install -e ".[all]")
+pip install nicegui
+
+# Launch the web UI
+rcm-denial web                       # http://localhost:8080
+rcm-denial web --port 3000           # custom port
+rcm-denial web --reload              # dev mode with hot-reload
+```
+
+Open http://localhost:8080 in your browser. The UI has 5 pages:
+
+| Page | What It Does |
+|------|-------------|
+| **Dashboard** | Overview cards with live stats from review queue |
+| **Process Claims** | Upload CSV (batch) or fill a form (single claim); pipeline stage stepper shows real-time progress |
+| **Review Queue** | Filterable table of claims; Approve / Re-route / Override / Write-off buttons with dialog modals |
+| **Stats** | Full scorecard: pipeline results, LLM cost by model, review queue breakdown, write-off impact, eval quality signals |
+| **Evals** | Golden dataset regression runner, quality signals from review queue, single-claim criteria checker |
+
+**Note:** The web UI and CLI share the same backend and database. Actions taken in the web UI are visible in the CLI and vice versa. You can use both simultaneously.
+
+### Step 9 — (Optional) Switch to PostgreSQL for Production
 
 ```bash
 # 1. Set in .env:
@@ -774,6 +936,21 @@ Options:
 
 Show review-queue quality signals (continuous eval from reviewer actions).
 
+### `rcm-denial web`
+
+Launch the NiceGUI web interface.
+
+```
+Usage: rcm-denial web [OPTIONS]
+
+Options:
+  --host TEXT       Bind host (default: 0.0.0.0)
+  --port INTEGER    Port (default: 8080)
+  --reload          Auto-reload on code changes (dev mode)
+```
+
+Requires: `pip install nicegui` (or `pip install -e ".[web]"`)
+
 ### `rcm-denial run-tests`
 
 Run the test suite.
@@ -860,6 +1037,9 @@ CSV Input ──► Intake ──► Enrichment ──► Analysis ──► Evi
 ```
 rcm_denial_proto/
 ├── pyproject.toml                          # Dependencies, entry point: rcm_denial.main:cli
+├── Dockerfile                              # Production container (Python 3.11 + Tesseract + OCR)
+├── docker-compose.yml                      # Full stack: app + Prometheus + Grafana + Loki
+├── .dockerignore                           # Excludes .venv, __pycache__, .env, output, logs
 ├── .env.example                            # Full environment variable template (40+ vars)
 │
 ├── src/rcm_denial/
@@ -877,7 +1057,15 @@ rcm_denial_proto/
 │   ├── workflows/                          # LangGraph StateGraph, supervisor router, batch engine
 │   ├── services/                           # 13 service modules (DB, queue, submission, metrics, etc.)
 │   ├── evaluation/evaluator.py             # 5-metric LLM-as-judge evaluation
-│   └── evals/criteria_checks.py            # 22 deterministic structural assertions
+│   ├── evals/criteria_checks.py            # 22 deterministic structural assertions
+│   └── web/                                # NiceGUI web UI (optional, fully separate)
+│       ├── app.py                          # Entry point, layout shell, navigation
+│       └── pages/
+│           ├── dashboard.py                # Landing page with metric cards + live stats
+│           ├── process.py                  # CSV upload / single claim form + pipeline stepper
+│           ├── review.py                   # Queue table + action buttons with dialogs
+│           ├── stats.py                    # Stats dashboard mirroring `rcm-denial stats`
+│           └── evals.py                    # Golden dataset runner, quality signals, claim checker
 │
 ├── data/
 │   ├── sample_denials.csv                  # 5 sample denied claims
@@ -1050,17 +1238,77 @@ pytest tests/ --cov=rcm_denial --cov-report=term-missing
 | `test_submission.py` | 14 | SubmissionResult/Status models, MockAdapter submit/receipt/status, adapter factory, registry CRUD, retry on transient error, permanent failure |
 | `test_cost_tracker.py` | 17 | calculate_cost (all models/default/zero), record_llm_call (auto/explicit/accumulate), get_claim_cost (structure/sum/missing), get_batch_cost_summary (structure/avg/all-time) |
 | `test_sop_pipeline_mode.py` | 17 | Pipeline mode toggle (on/off/global flag), manifest CRUD (read/write/upsert/overwrite/multi-payer), check_payer_coverage (all/partial/none/empty/degraded), normalize_payer_id (4 cases) |
-| `test_criteria_checks.py` | 24 | DenialAnalysis (valid/invalid action/category/confidence/root_cause/consistency/reasoning), AppealLetter (valid dict/string/missing clinical/regulatory/closing/length/placeholder), EvidenceCheckResult (valid/non-bool/empty/invalid/gaps), CorrectionPlan (valid/type/code_type/empty/no-content), Golden dataset (exists/load/categories/actions/runner/failures/serialize/appeal_letter) |
+| `test_criteria_checks.py` | 24 | DenialAnalysis checks, AppealLetter checks, EvidenceCheckResult checks, CorrectionPlan checks, Golden dataset regression |
+| `test_rate_limiter.py` | 6 | Token bucket burst, throttle after burst, sustained throughput, refill, module-level API, reset |
+
+---
+
+## Production Hardening Features
+
+These features move the system closer to production readiness:
+
+### 1. LLM Rate Limiting
+Token-bucket rate limiter prevents OpenAI 429 errors during large batch runs. Applied to `evidence_check_agent` and `response_agent` before every LLM call.
+
+```dotenv
+LLM_REQUESTS_PER_MINUTE=30    # token bucket refill rate
+LLM_BURST_SIZE=5               # max rapid-fire calls before throttling
+```
+
+### 2. OCR Upgrade (PyMuPDF + Tesseract)
+Dual-strategy PDF text extraction:
+1. **PyMuPDF (fitz)** -- instant text extraction for digital PDFs (most EOBs are digital)
+2. **Tesseract OCR** -- fallback for scanned/image-only PDFs
+
+PyMuPDF is ~10x faster and more accurate than Tesseract for text-layer PDFs. Falls back gracefully if not installed.
+
+```dotenv
+OCR_PYMUPDF_MIN_CHARS=50      # min chars from PyMuPDF before falling back to Tesseract
+```
+
+### 3. Error Recovery Checkpointing
+Per-node state checkpointing in the `claim_checkpoint` table. On batch restart after a crash:
+- Claims that fully completed are skipped (existing idempotency)
+- Claims that partially completed resume from the last successfully completed node
+- Zero wasted LLM cost on re-runs
+
+```dotenv
+ENABLE_CHECKPOINTING=true      # save state after each node
+```
+
+### 4. Web UI Authentication
+Basic username/password login for the NiceGUI web interface. Session-based via NiceGUI's built-in storage.
+
+```dotenv
+WEB_AUTH_ENABLED=false          # set true for any non-local deployment
+WEB_AUTH_SECRET=change-me       # session encryption key
+WEB_AUTH_USERS=admin:admin,reviewer:pass123   # comma-separated user:password pairs
+```
+
+### 5. CI/CD (GitHub Actions)
+Automated pipeline on every push/PR to main:
+1. **Lint** -- `ruff check` + `ruff format --check`
+2. **Test** -- full pytest suite with coverage report
+3. **Docker** -- build image to validate Dockerfile (only after lint + test pass)
+
+Workflow file: `.github/workflows/ci.yml`
+
+### 6. Web UI Enhancements
+- **Claim detail page** (`/claim/{run_id}`) -- full view with analysis, evidence, appeal letter preview, audit trail timeline, PDF download links
+- **Pagination** on review queue (20 items per page with Previous/Next controls)
+- **PDF download links** -- served via static file mount from output directory
+- **Clickable claim IDs** -- link from queue row to full detail page
 
 ---
 
 ## Future Enhancements
 
-- **Real API integrations** — swap mock tools with FHIR / Availity / Epic endpoints
-- **AWS Textract** — replace pytesseract in `eob_ocr_tool.py`
-- **REST API wrapper** — FastAPI layer over `process_claim_api()` for microservice deployment
-- **Parallel batch processing** — replace sequential loop with `asyncio.gather` + `Semaphore`
-- **Payer portal RPA** — Playwright browser automation for portal submission
-- **Alerting** ��� Prometheus alertmanager rules for write-off spikes, LLM cost anomalies
-- **A/B testing** — compare model versions via golden dataset regression scores
-- **RBAC** — role-based access control for review queue actions
+- **Real API integrations** -- swap mock tools with FHIR / Availity / Epic endpoints
+- **AWS Textract** -- add as third OCR strategy alongside PyMuPDF + Tesseract
+- **REST API wrapper** -- FastAPI layer over `process_claim_api()` for microservice deployment
+- **Parallel batch processing** -- replace sequential loop with `asyncio.gather` + `Semaphore`
+- **Payer portal RPA** -- Playwright browser automation for portal submission
+- **Alerting** -- Prometheus alertmanager rules for write-off spikes, LLM cost anomalies
+- **A/B testing** -- compare model versions via golden dataset regression scores
+- **RBAC** -- role-based access control for review queue actions (currently basic auth only)
+- **HIPAA compliance** -- PHI access audit logging, encryption at rest, BAA with LLM providers

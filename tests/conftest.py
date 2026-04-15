@@ -38,6 +38,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
         "rcm_denial.services.cost_tracker",
         "rcm_denial.services.submission_service",
         "rcm_denial.services.submission_adapters",
+        "rcm_denial.services.checkpoint_service",
     ):
         try:
             monkeypatch.setattr(f"{mod_path}._get_db_path", _get_db)
@@ -130,6 +131,20 @@ def isolated_data_dir(tmp_path, monkeypatch):
             output_tokens   INTEGER  NOT NULL DEFAULT 0,
             cost_usd        REAL     NOT NULL DEFAULT 0.0,
             recorded_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS claim_checkpoint (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id            TEXT,
+            run_id              TEXT    NOT NULL,
+            claim_id            TEXT    NOT NULL,
+            last_completed_node TEXT    NOT NULL,
+            node_index          INTEGER NOT NULL,
+            state_snapshot      TEXT    NOT NULL,
+            status              TEXT    DEFAULT 'in_progress',
+            updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(run_id, claim_id)
         )
     """)
     conn.commit()

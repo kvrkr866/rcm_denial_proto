@@ -40,20 +40,145 @@ def review_page():
         return
     create_header()
 
-    with ui.column().classes("w-full max-w-6xl mx-auto p-6 gap-6"):
-        ui.label("Review Queue").classes("text-3xl font-bold text-gray-800")
+    with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
+        ui.label("Review Queue").classes("text-2xl font-bold text-gray-800")
 
-        # ── Filters ───────────────────────────────────────────
-        page_state = {"current": 1, "page_size": 20}
+        with ui.tabs().classes("w-full") as tabs:
+            review_tab = ui.tab("Pending Review")
+            submit_tab = ui.tab("Ready to Submit")
+            submitted_tab = ui.tab("Submitted")
 
-        with ui.row().classes("gap-4 items-end"):
-            status_filter = ui.select(
-                label="Status",
-                options=["all", "pending", "approved", "re_routed", "re_processed",
-                         "human_override", "written_off", "submitted"],
-                value="pending",
-            ).classes("w-48")
-            batch_filter = ui.input("Batch ID", placeholder="All batches").classes("w-48")
+        with ui.tab_panels(tabs, value=review_tab).classes("w-full"):
+            # ── TAB 1: Pending Review ─────────────────────────
+            with ui.tab_panel(review_tab):
+                _review_panel_content()
+
+            # ── TAB 2: Ready to Submit (approved, awaiting submission) ──
+            with ui.tab_panel(submit_tab):
+                _submission_queue_panel()
+
+            # ── TAB 3: Submitted (final state) ────────────────
+            with ui.tab_panel(submitted_tab):
+                _submitted_panel()
+
+    create_footer()
+
+
+def _submission_queue_panel():
+    """Shows approved claims ready for payer submission with Submit buttons."""
+    submit_container = ui.column().classes("w-full gap-2")
+
+    async def refresh_submit_queue():
+        submit_container.clear()
+        try:
+            from rcm_denial.services.review_queue import get_queue
+            items = get_queue(status="approved", limit=100)
+            if not items:
+                with submit_container:
+                    ui.label("No approved claims awaiting submission.") \
+                        .classes("text-gray-400 italic py-4")
+                return
+
+            with submit_container:
+                ui.label(f"{len(items)} claim(s) approved and ready for payer submission") \
+                    .classes("text-sm text-green-600 font-semibold")
+
+                for item in items:
+                    _submit_queue_row(item, refresh_submit_queue)
+
+        except Exception as exc:
+            with submit_container:
+                ui.label(f"Error: {exc}").classes("text-red-600")
+
+    ui.button("Refresh", icon="refresh", on_click=refresh_submit_queue) \
+        .props("flat color=primary size=sm")
+    ui.timer(0.1, refresh_submit_queue, once=True)
+
+
+def _submit_queue_row(item: dict, refresh_callback) -> None:
+    claim_id = item.get("claim_id", "")
+    run_id = item.get("run_id", "")
+    amount = item.get("billed_amount", 0)
+    payer = item.get("denial_category", "")
+    batch_id = item.get("batch_id", "")
+
+    with ui.card().classes("w-full px-3 py-2 bg-green-50 border-l-4 border-green-500"):
+        with ui.row().classes("w-full items-center justify-between"):
+            with ui.column().classes("gap-0"):
+                ui.link(claim_id, f"/claim/{run_id}") \
+                    .classes("text-sm font-semibold text-blue-700 underline")
+                ui.label(f"${amount:,.2f} | {payer} | Batch: {batch_id}") \
+                    .classes("text-xs text-gray-500")
+            with ui.row().classes("gap-2"):
+                async def do_submit(rid=run_id):
+                    try:
+                        from rcm_denial.services.submission_service import submit_approved_claim
+                        result = submit_approved_claim(rid)
+                        if result.success:
+                            ui.notify(f"Submitted: {claim_id} (conf: {result.confirmation_number})",
+                                      type="positive")
+                        else:
+                            ui.notify(f"Submission failed: {result.error_detail}", type="negative")
+                        await refresh_callback()
+                    except Exception as exc:
+                        ui.notify(f"Error: {exc}", type="negative")
+
+                ui.button("Submit to Payer", icon="send",
+                          on_click=do_submit) \
+                    .props("color=green dense no-caps")
+
+
+def _submitted_panel():
+    """Shows claims that have been submitted to payer portals."""
+    container = ui.column().classes("w-full gap-2")
+
+    async def refresh():
+        container.clear()
+        try:
+            from rcm_denial.services.review_queue import get_queue
+            items = get_queue(status="submitted", limit=100)
+            if not items:
+                with container:
+                    ui.label("No submitted claims yet.").classes("text-gray-400 italic py-4")
+                return
+
+            with container:
+                ui.label(f"{len(items)} claim(s) submitted to payer portals") \
+                    .classes("text-sm text-blue-600 font-semibold")
+                for item in items:
+                    claim_id = item.get("claim_id", "")
+                    run_id = item.get("run_id", "")
+                    amount = item.get("billed_amount", 0)
+                    batch_id = item.get("batch_id", "")
+                    with ui.card().classes("w-full px-3 py-1 bg-blue-50 border-l-4 border-blue-500"):
+                        with ui.row().classes("items-center justify-between"):
+                            with ui.column().classes("gap-0"):
+                                ui.link(claim_id, f"/claim/{run_id}") \
+                                    .classes("text-sm font-semibold text-blue-700 underline")
+                                ui.label(f"${amount:,.2f} | Batch: {batch_id}") \
+                                    .classes("text-xs text-gray-500")
+                            ui.badge("SUBMITTED", color="blue")
+        except Exception as exc:
+            with container:
+                ui.label(f"Error: {exc}").classes("text-red-600")
+
+    ui.button("Refresh", icon="refresh", on_click=refresh).props("flat color=primary size=sm")
+    ui.timer(0.1, refresh, once=True)
+
+
+def _review_panel_content():
+    """Original review queue content, now inside a tab."""
+    # ── Filters ───────────────────────────────────────────
+    page_state = {"current": 1, "page_size": 20}
+
+    with ui.row().classes("gap-4 items-end"):
+        status_filter = ui.select(
+            label="Status",
+            options=["all", "pending", "approved", "re_routed", "re_processed",
+                     "human_override", "written_off", "submitted"],
+            value="pending",
+        ).classes("w-48")
+        batch_filter = ui.input("Batch ID", placeholder="All batches").classes("w-48")
 
         # ── Queue table ───────────────────────────────────────
         table_container = ui.column().classes("w-full")
@@ -119,8 +244,6 @@ def review_page():
 
         # Auto-load on page open
         ui.timer(0.1, refresh_queue, once=True)
-
-    create_footer()
 
 
 def _queue_item_row(item: dict, refresh_callback) -> None:

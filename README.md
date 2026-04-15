@@ -309,14 +309,33 @@ Pipeline scorecard mirroring `rcm-denial stats`:
 ### Demo flow (all from web UI -- no CLI needed)
 
 1. Open http://localhost:8080 -- login if auth is enabled
-2. Go to **Process Claims** page
-3. Click **Init SOPs** -- builds RAG collections for all payer folders
-4. Upload your CSV -- claims appear in the Pending panel
-5. Click **Process All** -- watch claims flow through the pipeline in real-time
-6. Go to **Review Queue** -- see claims with AI summaries
-7. **Approve** a claim, **re-route** another with notes, try **human override**
-8. Go to **Stats** -- see pipeline results, LLM cost, write-off impact
-9. Go to **Evals** -- run golden dataset checks
+2. Go to **Dashboard** -- click **Clear History** to reset any previous demo data
+3. Go to **Process Claims** page
+4. Click **Init SOPs** -- builds RAG collections (skips if already up-to-date)
+5. Upload your CSV -- claims appear in the Pending panel
+6. Select claims or click **Process All** -- watch pipeline stages light up in real-time
+7. Go to **Review Queue** > **Pending Review** tab -- see claims with AI summaries
+8. **Approve** a claim, **re-route** another with notes, try **human override**
+9. Go to **Review Queue** > **Ready to Submit** tab -- submit approved claims to payer
+10. Go to **Stats** -- see operational metrics, CARC breakdown, write-off impact
+11. Go to **Evals** -- run accuracy check against golden dataset
+12. Click any claim ID to see full detail: submission package, audit trail, appeal letter preview
+
+### Output structure (per claim)
+
+```
+output/CLM-33001/
+├── package/                                 <-- Submitted to payer portal
+│   ├── 00_cover_letter.pdf                  Cover letter (resubmission or appeal)
+│   ├── 01_denial_analysis.pdf               Root cause analysis report
+│   ├── 02_correction_plan.pdf               Code corrections (if resubmit)
+│   ├── 03_appeal_letter.pdf                 Formal appeal (if appeal)
+│   └── SUBMISSION_PACKAGE_CLM-33001.pdf     Merged bundle
+│
+└── internal_audit/                          <-- Internal only, NOT submitted
+    ├── audit_log.json                       Processing audit trail
+    └── submission_metadata.json             Claim metadata and pipeline results
+```
 
 ### Sharing the demo
 

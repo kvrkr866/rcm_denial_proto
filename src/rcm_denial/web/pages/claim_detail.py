@@ -76,27 +76,81 @@ def claim_detail_page(run_id: str):
             except Exception:
                 pass
 
-        # ── PDF Download ──────────────────────────────────────
+        # ── Submission Package (what goes to the payer) ─────────
         pdf_path = item.get("pdf_package_path")
         output_dir = item.get("output_dir")
+
         if pdf_path or output_dir:
-            ui.label("Documents").classes("text-xl font-semibold text-gray-700 mt-4")
-            with ui.row().classes("gap-4"):
-                if pdf_path and Path(pdf_path).exists():
-                    # Serve via static /output mount
-                    relative = Path(pdf_path).name
-                    claim_dir = Path(pdf_path).parent.name
-                    url = f"/output/{claim_dir}/{relative}"
-                    ui.link(f"Download {relative}", url, new_tab=True) \
-                        .classes("text-blue-600 underline")
-                if output_dir and Path(output_dir).exists():
-                    files = sorted(Path(output_dir).glob("*"))
-                    for f in files:
-                        if f.is_file():
-                            claim_dir = Path(output_dir).name
+            # ── Submission Package (package/ folder) ──────────
+            ui.label("Submission Package").classes("text-xl font-semibold text-gray-700 mt-4")
+            ui.label("These documents are submitted to the payer portal:") \
+                .classes("text-xs text-gray-500")
+
+            package_dir = Path(output_dir) / "package" if output_dir else None
+            # Fallback: check root dir for older outputs
+            if package_dir and not package_dir.exists():
+                package_dir = Path(output_dir)
+
+            submission_files = []
+            if package_dir and package_dir.exists():
+                for f in sorted(package_dir.glob("*.pdf")):
+                    submission_files.append(f)
+
+            if submission_files:
+                claim_dir = Path(output_dir).name
+                with ui.card().classes("w-full bg-blue-50 p-3"):
+                    for f in submission_files:
+                        # Build URL based on whether file is in package/ subdir or root
+                        if f.parent.name == "package":
+                            url = f"/output/{claim_dir}/package/{f.name}"
+                        else:
                             url = f"/output/{claim_dir}/{f.name}"
+                        with ui.row().classes("gap-2 items-center"):
+                            ui.icon("picture_as_pdf").classes("text-red-500")
                             ui.link(f.name, url, new_tab=True) \
-                                .classes("text-sm text-blue-500")
+                                .classes("text-sm text-blue-700 underline")
+                            if "cover_letter" in f.name.lower():
+                                ui.badge("Cover Letter", color="blue").props("dense outline")
+                            elif "analysis" in f.name.lower():
+                                ui.badge("Analysis", color="grey").props("dense outline")
+                            elif "correction" in f.name.lower():
+                                ui.badge("Correction Plan", color="orange").props("dense outline")
+                            elif "appeal" in f.name.lower():
+                                ui.badge("Appeal Letter", color="red").props("dense outline")
+                            elif "SUBMISSION_PACKAGE" in f.name:
+                                ui.badge("Merged Package", color="green").props("dense")
+            else:
+                ui.label("No submission PDFs generated.").classes("text-gray-400 italic text-sm")
+
+            # ── Internal Audit Data (internal_audit/ folder) ──
+            audit_dir = Path(output_dir) / "internal_audit" if output_dir else None
+            internal_files = []
+            if audit_dir and audit_dir.exists():
+                for f in sorted(audit_dir.glob("*")):
+                    if f.is_file():
+                        internal_files.append(f)
+            # Fallback: check root for older outputs
+            if not internal_files and output_dir and Path(output_dir).exists():
+                for f in sorted(Path(output_dir).glob("*.json")):
+                    internal_files.append(f)
+
+            if internal_files:
+                claim_dir = Path(output_dir).name
+                with ui.expansion("Internal Audit Data",
+                                  icon="folder_open").classes("w-full mt-2"):
+                    ui.label(
+                        f"Processing details and audit trail for {claim_id}. "
+                        f"Internal use only — not submitted to payer."
+                    ).classes("text-xs text-gray-500 mb-2")
+                    for f in internal_files:
+                        if f.parent.name == "internal_audit":
+                            url = f"/output/{claim_dir}/internal_audit/{f.name}"
+                        else:
+                            url = f"/output/{claim_dir}/{f.name}"
+                        with ui.row().classes("gap-2 items-center"):
+                            ui.icon("description").classes("text-gray-400")
+                            ui.link(f.name, url, new_tab=True) \
+                                .classes("text-xs text-gray-500")
 
         # ── Reviewer notes ────────────────────────────────────
         notes = item.get("reviewer_notes")
@@ -177,28 +231,70 @@ def _render_state_details(state: dict) -> None:
                 if text:
                     ui.label(text).classes("text-sm mt-2")
 
-    # Audit trail
-    audit_log = state.get("audit_log", [])
-    if audit_log:
-        ui.label("Audit Trail").classes("text-xl font-semibold text-gray-700 mt-4")
-        with ui.timeline(side="right"):
-            for entry in audit_log:
-                node = entry.get("node_name", "unknown")
-                entry_status = entry.get("status", "")
-                details = entry.get("details", "")
-                duration = entry.get("duration_ms")
-                color = "green" if entry_status == "completed" else (
-                    "red" if entry_status == "failed" else "blue"
-                )
-                subtitle = f"{duration:.0f}ms" if duration else ""
-                body = details[:200] if details else ""
-                ui.timeline_entry(
-                    title=f"{node} — {entry_status}",
-                    subtitle=subtitle,
-                    body=body,
-                    color=color,
-                    icon="check_circle" if entry_status == "completed" else "error",
-                )
+    # Audit trail — from DB first, fallback to state snapshot
+    ui.label("Audit Trail").classes("text-xl font-semibold text-gray-700 mt-4")
+
+    # Try DB first (persisted, per-claim)
+    try:
+        from rcm_denial.services.data_cleanup import get_audit_log_for_claim
+        db_audit = get_audit_log_for_claim(
+            claim_id=state.get("claim", {}).get("claim_id", ""),
+            batch_id=state.get("batch_id", ""),
+        )
+    except Exception:
+        db_audit = []
+
+    # Merge: prefer DB entries, fallback to state snapshot
+    audit_entries = db_audit if db_audit else state.get("audit_log", [])
+
+    if audit_entries:
+        # Table view (compact, searchable)
+        cols = [
+            {"name": "node",     "label": "Pipeline Stage", "field": "node",     "sortable": True},
+            {"name": "status",   "label": "Status",         "field": "status"},
+            {"name": "duration", "label": "Duration",       "field": "duration"},
+            {"name": "details",  "label": "Details",        "field": "details"},
+            {"name": "time",     "label": "Timestamp",      "field": "time"},
+        ]
+        rows = []
+        for entry in audit_entries:
+            node = entry.get("node_name", "unknown")
+            entry_status = entry.get("status", "")
+            duration = entry.get("duration_ms")
+            details = entry.get("details", "")
+            timestamp = entry.get("recorded_at") or entry.get("timestamp", "")
+            rows.append({
+                "node": node,
+                "status": entry_status,
+                "duration": f"{duration:.0f}ms" if duration else "--",
+                "details": (details[:100] + "...") if len(details) > 100 else details,
+                "time": str(timestamp)[:19] if timestamp else "--",
+            })
+        ui.table(columns=cols, rows=rows, row_key="node") \
+            .props("dense flat").classes("w-full")
+
+        # Also show timeline view in expandable section
+        with ui.expansion("Timeline View", icon="timeline").classes("w-full"):
+            with ui.timeline(side="right"):
+                for entry in audit_entries:
+                    node = entry.get("node_name", "unknown")
+                    entry_status = entry.get("status", "")
+                    details = entry.get("details", "")
+                    duration = entry.get("duration_ms")
+                    color = "green" if entry_status == "completed" else (
+                        "red" if entry_status == "failed" else "blue"
+                    )
+                    subtitle = f"{duration:.0f}ms" if duration else ""
+                    body = details[:200] if details else ""
+                    ui.timeline_entry(
+                        title=f"{node} -- {entry_status}",
+                        subtitle=subtitle,
+                        body=body,
+                        color=color,
+                        icon="check_circle" if entry_status == "completed" else "error",
+                    )
+    else:
+        ui.label("No audit entries found for this claim.").classes("text-gray-400 italic")
 
 
 def _info_card(label: str, value: str, color: str = "gray") -> None:

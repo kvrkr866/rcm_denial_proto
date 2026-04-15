@@ -3,13 +3,17 @@
 # Project: RCM - Denial Management
 # Author:  RK (kvrkr866@gmail.com)
 # File name: web/pages/stats.py
-# Purpose: Statistics dashboard — pipeline results, LLM
-#          cost, review queue, submissions, write-offs,
-#          eval quality signals.  Mirrors `rcm-denial stats`.
+# Purpose: Operational Statistics dashboard — claim-centric
+#          metrics for billing managers.
+#
+#          Technical metrics (LLM cost, tool performance,
+#          fallback rates) are in Grafana, not here.
 #
 ##########################################################
 
 from __future__ import annotations
+
+import sqlite3
 
 from nicegui import ui
 
@@ -23,22 +27,23 @@ def stats_page():
         return
     create_header()
 
-    with ui.column().classes("w-full max-w-6xl mx-auto p-6 gap-6"):
-        ui.label("Statistics").classes("text-3xl font-bold text-gray-800")
+    with ui.column().classes("w-full max-w-7xl mx-auto p-4 gap-4"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("Operational Statistics").classes("text-2xl font-bold text-gray-800")
+            with ui.row().classes("gap-3 items-end"):
+                batch_input = ui.input("Batch ID", placeholder="All batches").classes("w-48") \
+                    .props("dense outlined")
+                refresh_btn = ui.button("Load", icon="refresh").props("color=primary dense")
 
-        with ui.row().classes("gap-4 items-end"):
-            batch_input = ui.input("Batch ID", placeholder="All batches").classes("w-48")
-            refresh_btn = ui.button("Load Stats", icon="refresh").props("color=primary")
-
-        content = ui.column().classes("w-full gap-6")
+        content = ui.column().classes("w-full gap-4")
 
         async def load_stats():
             content.clear()
             batch_id = batch_input.value or ""
-
             with content:
                 try:
-                    _build_stats_panels(batch_id)
+                    data = _query_all_stats(batch_id)
+                    _render_stats(data, batch_id)
                 except Exception as exc:
                     ui.label(f"Error loading stats: {exc}").classes("text-red-600")
 
@@ -48,181 +53,329 @@ def stats_page():
     create_footer()
 
 
-def _build_stats_panels(batch_id: str) -> None:
-    """Build all stats panels. Called inside the content container."""
+# ──────────────────────────────────────────────────────────────────────
+# Data query
+# ──────────────────────────────────────────────────────────────────────
 
-    # ── 1. Pipeline Results ───────────────────────────────────
-    ui.label("Pipeline Results").classes("text-xl font-semibold text-gray-700")
-    try:
-        from rcm_denial.services.metrics_service import get_current_metrics
-        m = get_current_metrics(batch_id=batch_id)
+def _query_all_stats(batch_id: str = "") -> dict:
+    from rcm_denial.config.settings import settings
+    db_path = settings.data_dir / "rcm_denial.db"
+    if not db_path.exists():
+        return {}
 
-        pipeline = m.get("pipeline", {})
-        if not pipeline:
-            ui.label("No pipeline results found.").classes("text-gray-400 italic")
-        else:
-            cols = [
-                {"name": "status",   "label": "Status",       "field": "status"},
-                {"name": "pkg",      "label": "Package Type", "field": "pkg"},
-                {"name": "count",    "label": "Count",        "field": "count",     "sortable": True},
-                {"name": "avg_dur",  "label": "Avg Duration", "field": "avg_dur"},
-                {"name": "llm",      "label": "LLM Calls",   "field": "llm"},
-            ]
-            rows = []
-            for key, data in sorted(pipeline.items()):
-                parts = key.split("_", 1)
-                rows.append({
-                    "status":  parts[0],
-                    "pkg":     parts[1] if len(parts) > 1 else "-",
-                    "count":   data["count"],
-                    "avg_dur": f"{data['avg_duration_ms']:.0f} ms",
-                    "llm":     data["total_llm_calls"],
-                })
-            ui.table(columns=cols, rows=rows, row_key="status").props("dense flat") \
-                .classes("w-full")
+    where_batch = "WHERE batch_id = ?" if batch_id else ""
+    params = [batch_id] if batch_id else []
+    data: dict = {}
 
-            # Duration percentiles
-            d = m.get("duration_ms", {})
-            if d:
-                with ui.row().classes("gap-4 text-sm text-gray-500"):
-                    ui.label(f"p50: {d.get('p50', 0):.0f}ms")
-                    ui.label(f"p95: {d.get('p95', 0):.0f}ms")
-                    ui.label(f"p99: {d.get('p99', 0):.0f}ms")
-                    ui.label(f"avg: {d.get('avg', 0):.0f}ms")
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
 
-    except Exception as exc:
-        ui.label(f"Pipeline metrics unavailable: {exc}").classes("text-gray-400 text-sm")
+        # Claims intake
+        try:
+            row = conn.execute(
+                f"SELECT COUNT(*) as total, "
+                f"SUM(CASE WHEN status='valid' THEN 1 ELSE 0 END) as valid, "
+                f"SUM(CASE WHEN status='rejected' THEN 1 ELSE 0 END) as rejected "
+                f"FROM claim_intake_log {where_batch}", params
+            ).fetchone()
+            data["intake"] = dict(row) if row else {"total": 0, "valid": 0, "rejected": 0}
+        except Exception:
+            data["intake"] = {"total": 0, "valid": 0, "rejected": 0}
 
-    ui.separator()
+        # Pipeline results
+        try:
+            rows = conn.execute(
+                f"SELECT final_status, package_type, COUNT(*) as cnt, "
+                f"AVG(duration_ms) as avg_ms, MIN(duration_ms) as min_ms, "
+                f"MAX(duration_ms) as max_ms "
+                f"FROM claim_pipeline_result {where_batch} "
+                f"GROUP BY final_status, package_type", params
+            ).fetchall()
+            data["pipeline"] = [dict(r) for r in rows]
+        except Exception:
+            data["pipeline"] = []
 
-    # ── 2. LLM Cost ───────────────────────────────────────────
-    ui.label("LLM Cost").classes("text-xl font-semibold text-gray-700")
-    try:
-        from rcm_denial.services.cost_tracker import get_batch_cost_summary
-        cost = get_batch_cost_summary(batch_id=batch_id)
+        # Errors by stage
+        try:
+            rows = conn.execute(
+                f"SELECT node_name, COUNT(*) as error_count "
+                f"FROM claim_audit_log "
+                f"{'WHERE batch_id = ? AND' if batch_id else 'WHERE'} status = 'failed' "
+                f"GROUP BY node_name ORDER BY error_count DESC", params
+            ).fetchall()
+            data["errors_by_stage"] = [dict(r) for r in rows]
+        except Exception:
+            data["errors_by_stage"] = []
 
-        if cost["total_calls"] == 0:
-            ui.label("No LLM calls recorded yet.").classes("text-gray-400 italic")
-        else:
-            # Summary chips
-            with ui.row().classes("gap-4"):
-                _chip("Total Cost", f"${cost['total_cost_usd']:.6f}", "green")
-                _chip("Total Calls", str(cost["total_calls"]), "blue")
-                _chip("Claims Tracked", str(cost["claims_tracked"]), "blue")
-                _chip("Avg/Claim", f"${cost['avg_cost_per_claim']:.6f}", "green")
+        # Human review outcomes
+        try:
+            rows = conn.execute(
+                f"SELECT status, COUNT(*) as cnt, "
+                f"SUM(billed_amount) as total_amount, "
+                f"AVG(review_count) as avg_cycles "
+                f"FROM human_review_queue {where_batch} "
+                f"GROUP BY status", params
+            ).fetchall()
+            data["review_outcomes"] = {r["status"]: dict(r) for r in rows}
+        except Exception:
+            data["review_outcomes"] = {}
 
-            # By model table
-            if cost.get("by_model"):
+        # Per-CARC breakdown
+        try:
+            rows = conn.execute(
+                f"SELECT carc_code, recommended_action, denial_category, "
+                f"COUNT(*) as cnt "
+                f"FROM claim_pipeline_result {where_batch} "
+                f"GROUP BY carc_code, recommended_action, denial_category "
+                f"ORDER BY cnt DESC", params
+            ).fetchall()
+            data["by_carc"] = [dict(r) for r in rows]
+        except Exception:
+            data["by_carc"] = []
+
+        # Per-category with amounts (from review queue which has billed_amount)
+        try:
+            rows = conn.execute(
+                f"SELECT denial_category, COUNT(*) as cnt, "
+                f"SUM(billed_amount) as total_amount "
+                f"FROM human_review_queue {where_batch} "
+                f"GROUP BY denial_category ORDER BY total_amount DESC", params
+            ).fetchall()
+            data["by_category"] = [dict(r) for r in rows]
+        except Exception:
+            data["by_category"] = []
+
+        # By routing action
+        try:
+            rows = conn.execute(
+                f"SELECT COALESCE(routing_decision, 'unknown') as action, "
+                f"COUNT(*) as cnt, SUM(billed_amount) as total_amount "
+                f"FROM human_review_queue {where_batch} "
+                f"GROUP BY routing_decision ORDER BY total_amount DESC", params
+            ).fetchall()
+            data["by_routing"] = [dict(r) for r in rows]
+        except Exception:
+            data["by_routing"] = []
+
+        # Submissions
+        try:
+            rows = conn.execute(
+                f"SELECT status, COUNT(*) as cnt "
+                f"FROM submission_log {where_batch} "
+                f"GROUP BY status", params
+            ).fetchall()
+            data["submissions"] = {r["status"]: r["cnt"] for r in rows}
+        except Exception:
+            data["submissions"] = {}
+
+        # Processing time
+        try:
+            row = conn.execute(
+                f"SELECT AVG(duration_ms) as avg_ms, "
+                f"MIN(duration_ms) as min_ms, "
+                f"MAX(duration_ms) as max_ms, "
+                f"COUNT(*) as total "
+                f"FROM claim_pipeline_result {where_batch}", params
+            ).fetchone()
+            data["timing"] = dict(row) if row else {}
+        except Exception:
+            data["timing"] = {}
+
+        # Write-offs
+        try:
+            rows = conn.execute(
+                f"SELECT write_off_reason, COUNT(*) as cnt, "
+                f"SUM(billed_amount) as amount "
+                f"FROM human_review_queue "
+                f"{'WHERE batch_id = ? AND' if batch_id else 'WHERE'} status = 'written_off' "
+                f"GROUP BY write_off_reason", params
+            ).fetchall()
+            data["write_offs"] = [dict(r) for r in rows]
+        except Exception:
+            data["write_offs"] = []
+
+    return data
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Render
+# ──────────────────────────────────────────────────────────────────────
+
+def _render_stats(data: dict, batch_id: str) -> None:
+    if not data:
+        ui.label("No data found. Process a batch first.").classes("text-gray-400 italic")
+        return
+
+    label = f"Batch: {batch_id}" if batch_id else "All Batches"
+    ui.label(label).classes("text-sm text-gray-500")
+
+    intake = data.get("intake", {})
+    timing = data.get("timing", {})
+    review = data.get("review_outcomes", {})
+    submissions = data.get("submissions", {})
+
+    total_loaded = intake.get("total", 0)
+    total_processed = timing.get("total", 0)
+    total_approved = review.get("approved", {}).get("cnt", 0) + review.get("submitted", {}).get("cnt", 0)
+    total_pending = review.get("pending", {}).get("cnt", 0) + review.get("re_processed", {}).get("cnt", 0)
+    total_rerouted = review.get("re_routed", {}).get("cnt", 0)
+    total_writeoff = review.get("written_off", {}).get("cnt", 0)
+    total_submitted = submissions.get("submitted", 0)
+    total_sub_failed = submissions.get("failed", 0)
+    total_amount = sum(v.get("total_amount", 0) or 0 for v in review.values())
+
+    # ── Row 1: KPI cards ──────────────────────────────────────
+    with ui.grid(columns=5).classes("w-full gap-3"):
+        _kpi("Claims Loaded", str(total_loaded), "blue")
+        _kpi("Processed", str(total_processed), "blue")
+        _kpi("Approved", str(total_approved), "green")
+        _kpi("Pending Review", str(total_pending), "orange")
+        _kpi("Billed Amount at Risk", f"${total_amount:,.0f}", "blue")
+
+    with ui.grid(columns=5).classes("w-full gap-3 mt-1"):
+        _kpi("Re-routed (loop)", str(total_rerouted), "cyan")
+        _kpi("Awaiting Submission", str(review.get("approved", {}).get("cnt", 0)), "orange")
+        _kpi("Submitted to Payer", str(total_submitted), "green")
+        _kpi("Submission Failed", str(total_sub_failed), "red" if total_sub_failed else "green")
+        _kpi("Written Off", str(total_writeoff), "red" if total_writeoff else "green")
+
+    ui.separator().classes("mt-2")
+
+    # ── Row 2: Two columns ────────────────────────────────────
+    with ui.row().classes("w-full gap-4"):
+
+        # LEFT: Processing time + CARC breakdown
+        with ui.column().classes("flex-1 gap-3"):
+            ui.label("Processing Time").classes("text-sm font-semibold text-gray-700")
+            if timing and timing.get("avg_ms"):
+                avg_ms = timing.get("avg_ms") or 0
+                min_ms = timing.get("min_ms") or 0
+                max_ms = timing.get("max_ms") or 0
+                with ui.grid(columns=3).classes("w-full gap-2"):
+                    _kpi("Average", f"{avg_ms / 1000:.1f}s", "blue")
+                    _kpi("Fastest", f"{min_ms / 1000:.1f}s", "green")
+                    _kpi("Slowest", f"{max_ms / 1000:.1f}s", "orange")
+            else:
+                ui.label("No timing data yet.").classes("text-gray-400 italic text-sm")
+
+            # CARC code breakdown
+            carc_data = data.get("by_carc", [])
+            if carc_data:
+                ui.label("Claims by CARC Code").classes("text-sm font-semibold text-gray-700 mt-3")
                 cols = [
-                    {"name": "model",  "label": "Model",         "field": "model"},
-                    {"name": "calls",  "label": "Calls",         "field": "calls"},
-                    {"name": "input",  "label": "Input Tokens",  "field": "input"},
-                    {"name": "output", "label": "Output Tokens", "field": "output"},
-                    {"name": "cost",   "label": "Cost (USD)",    "field": "cost"},
+                    {"name": "carc", "label": "CARC", "field": "carc"},
+                    {"name": "action", "label": "Action", "field": "action"},
+                    {"name": "category", "label": "Category", "field": "category"},
+                    {"name": "count", "label": "Claims", "field": "count", "sortable": True},
                 ]
-                rows = [
-                    {
-                        "model":  model,
-                        "calls":  d["calls"],
-                        "input":  f"{d['input_tokens']:,}",
-                        "output": f"{d['output_tokens']:,}",
-                        "cost":   f"${d['cost_usd']:.6f}",
-                    }
-                    for model, d in sorted(cost["by_model"].items())
+                rows = [{
+                    "carc": f"CARC {r.get('carc_code', '?')}",
+                    "action": (r.get("recommended_action") or "?").upper(),
+                    "category": (r.get("denial_category") or "?").replace("_", " ").title(),
+                    "count": r["cnt"],
+                } for r in carc_data]
+                ui.table(columns=cols, rows=rows, row_key="carc") \
+                    .props("dense flat").classes("w-full")
+
+        # RIGHT: Review outcomes + errors
+        with ui.column().classes("flex-1 gap-3"):
+            ui.label("Human Review Outcomes").classes("text-sm font-semibold text-gray-700")
+            if review:
+                cols = [
+                    {"name": "status", "label": "Status", "field": "status"},
+                    {"name": "count", "label": "Claims", "field": "count", "sortable": True},
+                    {"name": "amount", "label": "Billed Amount", "field": "amount"},
+                    {"name": "cycles", "label": "Avg Cycles", "field": "cycles"},
                 ]
-                ui.table(columns=cols, rows=rows, row_key="model").props("dense flat") \
-                    .classes("w-full")
+                rows = [{
+                    "status": status.replace("_", " ").upper(),
+                    "count": v.get("cnt", 0),
+                    "amount": f"${(v.get('total_amount') or 0):,.0f}",
+                    "cycles": f"{(v.get('avg_cycles') or 0):.1f}",
+                } for status, v in sorted(review.items())]
+                ui.table(columns=cols, rows=rows, row_key="status") \
+                    .props("dense flat").classes("w-full")
+            else:
+                ui.label("No review data yet.").classes("text-gray-400 italic text-sm")
 
-    except Exception as exc:
-        ui.label(f"Cost data unavailable: {exc}").classes("text-gray-400 text-sm")
-
-    ui.separator()
-
-    # ── 3. Review Queue ───────────────────────────────────────
-    ui.label("Review Queue").classes("text-xl font-semibold text-gray-700")
-    try:
-        from rcm_denial.services.review_queue import get_review_stats
-        rq = get_review_stats(batch_id=batch_id)
-
-        total = rq.get("total_claims", 0)
-        if total == 0:
-            ui.label("No review queue data.").classes("text-gray-400 italic")
-        else:
-            with ui.row().classes("gap-4"):
-                _chip("Total", str(total), "blue")
-                _chip("Approved", str(rq.get("approved", 0)), "green")
-                _chip("Pending", str(rq.get("pending", 0)), "orange")
-                _chip("Written Off", str(rq.get("write_off_count", 0)), "red")
-
-            # Status breakdown
-            breakdown = rq.get("status_breakdown", {})
-            if breakdown:
-                with ui.row().classes("gap-3 flex-wrap"):
-                    for status, count in sorted(breakdown.items()):
-                        color = {"pending": "orange", "approved": "green", "submitted": "green",
-                                 "re_routed": "blue", "human_override": "purple",
-                                 "written_off": "red"}.get(status, "gray")
-                        ui.badge(f"{status}: {count}", color=color)
-
-            # Write-off impact
-            wo_amount = rq.get("write_off_total_amount", 0)
-            if wo_amount > 0:
-                ui.label(f"Write-off revenue impact: ${wo_amount:,.2f}") \
-                    .classes("text-red-600 font-semibold mt-2")
-
-    except Exception as exc:
-        ui.label(f"Review stats unavailable: {exc}").classes("text-gray-400 text-sm")
-
-    ui.separator()
-
-    # ── 4. Eval Quality Signals ────────────────────────────────
-    ui.label("Eval Quality Signals").classes("text-xl font-semibold text-gray-700")
-    try:
-        from rcm_denial.services.review_queue import get_review_stats
-        rq = get_review_stats(batch_id=batch_id)
-        fp_rate = rq.get("first_pass_approval_rate_pct")
-        ov_rate = rq.get("override_rate_pct")
-        calib = rq.get("confidence_calibration", {})
-        reroute = rq.get("reroute_by_stage", {})
-        mc_ids = rq.get("multi_cycle_claim_ids", [])
-
-        if fp_rate is None and ov_rate is None:
-            ui.label("No eval data yet.").classes("text-gray-400 italic")
-        else:
-            with ui.row().classes("gap-4"):
-                if fp_rate is not None:
-                    color = "green" if fp_rate >= 70 else ("orange" if fp_rate >= 50 else "red")
-                    _chip("First-Pass Approval", f"{fp_rate:.1f}%", color)
-                if ov_rate is not None:
-                    color = "green" if ov_rate <= 5 else ("orange" if ov_rate <= 15 else "red")
-                    _chip("Override Rate", f"{ov_rate:.1f}%", color)
-                if mc_ids:
-                    _chip("Multi-Cycle Claims", str(len(mc_ids)), "orange")
-
-            # Confidence calibration
-            gap = calib.get("gap")
-            if gap is not None:
-                color = "green" if gap > 0 else "red"
-                ui.label(f"Confidence calibration gap: {gap:+.3f}") \
-                    .classes(f"text-{color}-600 text-sm mt-1")
-                ui.label("Positive = well-calibrated (approved claims score higher than re-routed)") \
-                    .classes("text-xs text-gray-400")
-
-            # Reroute hotspots
-            if reroute:
-                ui.label("Re-route hotspots:").classes("text-sm font-semibold mt-2")
-                for stage, cnt in sorted(reroute.items(), key=lambda x: -x[1]):
+            # Errors
+            errors = data.get("errors_by_stage", [])
+            if errors:
+                ui.label("Errors by Pipeline Stage").classes("text-sm font-semibold text-red-600 mt-3")
+                for e in errors:
                     with ui.row().classes("gap-2 items-center"):
-                        ui.label(stage).classes("text-sm text-gray-600 w-48")
-                        ui.linear_progress(value=cnt / max(rq.get("total_claims", 1), 1)) \
-                            .classes("w-48").props("color=orange")
-                        ui.label(str(cnt)).classes("text-sm")
+                        ui.label(e["node_name"].replace("_", " ").title()).classes("text-xs text-gray-600 w-40")
+                        ui.badge(str(e["error_count"]), color="red").props("dense")
 
-    except Exception:
-        ui.label("Eval signals unavailable.").classes("text-gray-400 text-sm")
+    ui.separator().classes("mt-2")
+
+    # ── Row 3: Categories + Write-offs ────────────────────────
+    with ui.row().classes("w-full gap-4"):
+        # Denial categories with amounts
+        with ui.column().classes("flex-1 gap-2"):
+            ui.label("Denial Categories").classes("text-sm font-semibold text-gray-700")
+            categories = data.get("by_category", [])
+            if categories:
+                cols = [
+                    {"name": "cat", "label": "Category", "field": "cat"},
+                    {"name": "count", "label": "Claims", "field": "count", "sortable": True},
+                    {"name": "amount", "label": "Total Amount", "field": "amount"},
+                ]
+                rows = [{
+                    "cat": (r.get("denial_category") or "unknown").replace("_", " ").title(),
+                    "count": r["cnt"],
+                    "amount": f"${(r.get('total_amount') or 0):,.0f}",
+                } for r in categories]
+                ui.table(columns=cols, rows=rows, row_key="cat") \
+                    .props("dense flat").classes("w-full")
+
+        # Write-offs + Recovery rate
+        with ui.column().classes("flex-1 gap-2"):
+            ui.label("Write-Off Revenue Impact").classes("text-sm font-semibold text-gray-700")
+            write_offs = data.get("write_offs", [])
+            if write_offs:
+                total_wo = sum(r.get("amount", 0) or 0 for r in write_offs)
+                ui.label(f"Total Lost: ${total_wo:,.2f}").classes("text-lg font-bold text-red-600")
+                cols = [
+                    {"name": "reason", "label": "Reason", "field": "reason"},
+                    {"name": "count", "label": "Claims", "field": "count"},
+                    {"name": "amount", "label": "Amount", "field": "amount"},
+                ]
+                rows = [{
+                    "reason": r["write_off_reason"].replace("_", " ").title(),
+                    "count": r["cnt"],
+                    "amount": f"${(r.get('amount') or 0):,.0f}",
+                } for r in write_offs]
+                ui.table(columns=cols, rows=rows, row_key="reason") \
+                    .props("dense flat").classes("w-full")
+            else:
+                ui.label("No write-offs -- $0 revenue lost").classes("text-green-600 text-sm")
+
+            # Recovery rate
+            if total_processed > 0:
+                recovery = total_approved + total_submitted
+                rate = recovery / total_processed * 100
+                color = "green" if rate >= 70 else ("orange" if rate >= 50 else "red")
+                ui.label("Recovery Rate").classes("text-sm font-semibold text-gray-700 mt-3")
+                ui.label(f"{rate:.1f}%").classes(f"text-2xl font-bold text-{color}-600")
+                ui.label(f"{recovery} of {total_processed} claims recovered") \
+                    .classes("text-xs text-gray-500")
+
+    # ── Row 4: Routing breakdown ──────────────────────────────
+    routing = data.get("by_routing", [])
+    if routing:
+        ui.separator().classes("mt-2")
+        ui.label("Claims by Recommended Action").classes("text-sm font-semibold text-gray-700")
+        with ui.grid(columns=4).classes("w-full gap-2"):
+            for r in routing:
+                action = (r.get("action") or "unknown").upper()
+                color = {"RESUBMIT": "blue", "APPEAL": "orange", "BOTH": "purple",
+                         "WRITE_OFF": "red"}.get(action, "gray")
+                _kpi(action, f"{r['cnt']} (${(r.get('total_amount') or 0):,.0f})", color)
 
 
-def _chip(label: str, value: str, color: str) -> None:
-    with ui.card().classes(f"px-4 py-2 bg-{color}-50"):
-        ui.label(value).classes(f"text-xl font-bold text-{color}-700")
-        ui.label(label).classes("text-xs text-gray-500")
+def _kpi(label: str, value: str, color: str) -> None:
+    with ui.card().classes(f"bg-{color}-50 h-16 flex items-center justify-center px-3"):
+        with ui.column().classes("items-center gap-0"):
+            ui.label(value).classes(f"text-lg font-bold text-{color}-700")
+            ui.label(label).classes("text-[10px] text-gray-500 text-center leading-tight")

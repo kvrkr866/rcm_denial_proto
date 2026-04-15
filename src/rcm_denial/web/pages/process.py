@@ -76,10 +76,18 @@ def process_page():
     with ui.column().classes("w-full max-w-7xl mx-auto px-4 py-1 gap-1") \
             .style("height: calc(100vh - 80px)"):
 
-        # ── Action bar: Upload + Process + Init SOPs (single compact row) ──
+        # ── Init SOPs: top-right, before everything else ──────
+        with ui.row().classes("w-full justify-end flex-shrink-0"):
+            ui.button("Init SOPs", icon="build",
+                      on_click=lambda: _run_sop_init(center_container)) \
+                .props("flat color=grey dense size=sm no-caps") \
+                .tooltip("Build/refresh SOP RAG collections for all payers")
+
+        # ── Claim(s) as Input ─────────────────────────────────
         with ui.card().classes("w-full py-1 px-3 flex-shrink-0"):
+            ui.label("Claim(s) as Input").classes("text-xs font-semibold text-gray-600 mb-1")
             with ui.row().classes("w-full gap-3 items-center"):
-                # CSV upload as a compact button with tick/status
+                # CSV upload: compact button with tick/status
                 upload_icon = ui.icon("cloud_upload").classes("text-gray-400 text-lg")
                 upload_label = ui.button(
                     "Upload CSV", icon="attach_file",
@@ -123,15 +131,9 @@ def process_page():
                     .classes("w-40").props("dense outlined")
                 batch_id_input.value = f"B-{datetime.now().strftime('%y%m%d-%H%M')}-001"
 
-                # Push Init SOPs to the right
-                ui.space()
-                ui.button("Init SOPs", icon="build",
-                          on_click=lambda: _run_sop_init(center_container)) \
-                    .props("flat color=grey dense size=sm no-caps") \
-                    .tooltip("Build/refresh SOP RAG collections")
-
-        # ── Page heading (outside the panels, between action bar and panels) ──
-        ui.label("Process Claims").classes("text-lg font-bold text-gray-800 flex-shrink-0 mt-1")
+        # ── Claim(s) Processing Progress (title for the three panels) ──
+        ui.label("Claim(s) Processing Progress") \
+            .classes("text-sm font-bold text-gray-800 flex-shrink-0 mt-1")
 
         # ── THREE-PANEL layout (fills remaining viewport) ─────
         with ui.row().classes("w-full gap-2 flex-1 min-h-0"):
@@ -470,6 +472,7 @@ async def _run_batch(
                     "status": getattr(pkg, "status", "unknown"),
                     "package_type": getattr(pkg, "package_type", "unknown"),
                     "run_id": getattr(pkg, "run_id", ""),
+                    "batch_id": state.batch_id,
                     "duration_s": round(elapsed, 1),
                     "output_dir": getattr(pkg, "output_dir", ""),
                     "routing": getattr(pkg, "package_type", ""),
@@ -551,12 +554,36 @@ def _update_stage_indicators(
     stage_labels: dict[str, ui.label],
     status_label: ui.label,
 ) -> None:
-    """Query claim_audit_log for completed nodes and update UI."""
+    """
+    Query checkpoint table for completed nodes and update UI.
+    Checkpoints are written per-node during processing (unlike audit_log
+    which is written after the claim fully completes).
+    """
     from rcm_denial.config.settings import settings
     db_path = settings.data_dir / "rcm_denial.db"
     if not db_path.exists():
         return
 
+    # Strategy 1: Check checkpoint table (written per-node in real-time)
+    checkpoint_node = None
+    checkpoint_index = -1
+    try:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT last_completed_node, node_index FROM claim_checkpoint
+                WHERE claim_id = ? AND batch_id = ?
+                """,
+                (claim_id, batch_id),
+            ).fetchone()
+            if row:
+                checkpoint_node = row[0]
+                checkpoint_index = row[1]
+    except Exception:
+        pass
+
+    # Strategy 2: Fallback to audit_log (written after claim completes)
+    audit_nodes: dict[str, str] = {}
     try:
         with sqlite3.connect(db_path) as conn:
             rows = conn.execute(
@@ -567,16 +594,31 @@ def _update_stage_indicators(
                 """,
                 (claim_id, batch_id),
             ).fetchall()
+            for node_name, node_status in rows:
+                audit_nodes[node_name] = node_status
     except Exception:
-        return
+        pass
 
-    completed_nodes = set()
-    current_node = None
+    # Merge: checkpoint tells us which nodes completed; audit gives detail
+    from rcm_denial.services.checkpoint_service import NODE_ORDER
 
-    for node_name, node_status in rows:
+    completed_nodes: set[str] = set()
+    current_node: str | None = None
+
+    if checkpoint_index >= 0:
+        # All nodes up to checkpoint_index are completed
+        for i, node_name in enumerate(NODE_ORDER):
+            if i <= checkpoint_index:
+                completed_nodes.add(node_name)
+            elif i == checkpoint_index + 1:
+                current_node = node_name  # next node is likely running now
+                break
+
+    # Also incorporate audit_log entries
+    for node_name, node_status in audit_nodes.items():
         if node_status == "completed":
             completed_nodes.add(node_name)
-        elif node_status == "started":
+        elif node_status == "started" and node_name not in completed_nodes:
             current_node = node_name
         elif node_status == "failed":
             if node_name in stage_icons:
@@ -586,6 +628,7 @@ def _update_stage_indicators(
                 stage_icons[node_name].update()
                 stage_labels[node_name].update()
 
+    # Update completed nodes
     for node_name in completed_nodes:
         if node_name in stage_icons:
             stage_icons[node_name]._props["name"] = "check_circle"
@@ -594,6 +637,7 @@ def _update_stage_indicators(
             stage_icons[node_name].update()
             stage_labels[node_name].update()
 
+    # Update current running node
     if current_node and current_node in stage_icons and current_node not in completed_nodes:
         stage_icons[current_node]._props["name"] = "sync"
         stage_icons[current_node].classes(replace="text-xl text-blue-500 animate-spin")
@@ -601,6 +645,10 @@ def _update_stage_indicators(
         stage_icons[current_node].update()
         stage_labels[current_node].update()
         status_label.set_text(f"Running: {current_node}")
+        status_label.update()
+    elif completed_nodes:
+        last = max(completed_nodes, key=lambda n: NODE_ORDER.index(n) if n in NODE_ORDER else -1)
+        status_label.set_text(f"Completed: {last}")
         status_label.update()
 
 
@@ -614,39 +662,41 @@ def _completed_claim_card(info: dict) -> None:
     claim_id = info.get("claim_id", "?")
     payer = info.get("payer_id", "?")
     pkg = info.get("package_type", "?")
-    routing = info.get("routing", "")
     duration = info.get("duration_s", 0)
     run_id = info.get("run_id", "")
+    batch_id = info.get("batch_id", "")
     error = info.get("error", "")
 
-    with ui.card().classes(f"w-full px-3 py-2 bg-{color}-50 border-l-4 border-{color}-500"):
+    with ui.card().classes(f"w-full px-2 py-1 bg-{color}-50 border-l-4 border-{color}-500"):
         with ui.row().classes("items-center justify-between"):
             with ui.column().classes("gap-0"):
                 if run_id:
                     ui.link(claim_id, f"/claim/{run_id}") \
-                        .classes("text-sm font-semibold text-blue-700 underline")
+                        .classes("text-xs font-semibold text-blue-700 underline")
                 else:
-                    ui.label(claim_id).classes("text-sm font-semibold")
-                ui.label(
-                    f"{payer} | {pkg} | {routing}" +
-                    (f" | {duration}s" if duration else "")
-                ).classes("text-xs text-gray-500")
+                    ui.label(claim_id).classes("text-xs font-semibold")
+                ui.label(f"{payer} | {pkg} | {duration}s").classes("text-[10px] text-gray-500")
+                if batch_id:
+                    ui.label(f"Batch: {batch_id}").classes("text-[9px] text-gray-400")
 
-            ui.badge(status.upper(), color=color)
+            ui.badge(status[:6].upper(), color=color).props("dense")
 
         if error:
-            ui.label(f"Error: {error[:100]}").classes("text-xs text-red-500 mt-1")
+            ui.label(f"{error[:80]}").classes("text-[10px] text-red-500")
 
         if run_id:
-            with ui.row().classes("gap-2 mt-1"):
-                ui.button("Review", icon="rate_review", on_click=lambda r=run_id: ui.navigate.to(f"/claim/{r}")) \
-                    .props("flat dense size=xs color=primary")
+            with ui.row().classes("gap-1"):
+                ui.button("Review", icon="rate_review",
+                          on_click=lambda r=run_id: ui.navigate.to(f"/claim/{r}")) \
+                    .props("flat dense round size=xs color=primary") \
+                    .tooltip("View claim detail")
                 output_dir = info.get("output_dir", "")
                 if output_dir:
                     claim_dir = Path(output_dir).name
                     ui.button("PDF", icon="picture_as_pdf",
                               on_click=lambda d=claim_dir: ui.navigate.to(f"/output/{d}/")) \
-                        .props("flat dense size=xs color=grey")
+                        .props("flat dense round size=xs color=grey") \
+                        .tooltip("Download PDF package")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -657,41 +707,48 @@ async def _run_sop_init(center_container):
     center_container.clear()
     with center_container:
         spinner = ui.spinner("dots", size="lg")
-        status = ui.label("Building SOP RAG collections...").classes("text-blue-600")
+        status_label = ui.label("Checking SOP collections...").classes("text-blue-600 text-sm")
 
     try:
-        from rcm_denial.services.sop_ingestion import ingest_all_payer_sops, check_payer_coverage
+        from rcm_denial.services.sop_ingestion import ingest_all_payer_sops
 
-        await asyncio.get_event_loop().run_in_executor(
+        # This will skip already-fresh collections automatically
+        result = await asyncio.get_event_loop().run_in_executor(
             None, lambda: ingest_all_payer_sops(run_verify=True)
         )
         spinner.set_visibility(False)
 
-        # Show results
-        from rcm_denial.services.sop_ingestion import get_collection_stats
-        stats = get_collection_stats()
+        # Show results from manifest
+        from rcm_denial.services.sop_ingestion import read_manifest
+        manifest = read_manifest()
+        payers = manifest.get("payers", {})
 
         with center_container:
             center_container.clear()
-            ui.icon("check_circle").classes("text-4xl text-green-600")
-            ui.label("SOP collections built successfully").classes("text-lg font-semibold text-green-700")
+            ui.icon("check_circle").classes("text-3xl text-green-600")
+            ui.label("SOP collections ready").classes("text-base font-semibold text-green-700")
 
-            if stats:
+            if payers:
                 cols = [
                     {"name": "payer", "label": "Payer", "field": "payer"},
-                    {"name": "docs", "label": "Documents", "field": "docs"},
+                    {"name": "docs", "label": "Docs", "field": "docs"},
                     {"name": "status", "label": "Status", "field": "status"},
+                    {"name": "note", "label": "Note", "field": "note"},
                 ]
-                rows = [
-                    {"payer": s.get("collection", s.get("payer_key", "?")),
-                     "docs": s.get("document_count", 0),
-                     "status": s.get("status", "ok")}
-                    for s in stats
-                ]
+                rows = []
+                for key, info in sorted(payers.items()):
+                    built_now = result.get(key, 0)
+                    was_skipped = info.get("status") == "ok" and built_now == info.get("document_count", 0)
+                    rows.append({
+                        "payer": key,
+                        "docs": info.get("document_count", 0),
+                        "status": info.get("status", "?").upper(),
+                        "note": "Already up-to-date" if was_skipped else "Built/refreshed",
+                    })
                 ui.table(columns=cols, rows=rows, row_key="payer") \
                     .props("dense flat").classes("w-full mt-2")
 
-        ui.notify("SOP init complete", type="positive")
+        ui.notify("SOP collections ready", type="positive")
 
     except Exception as exc:
         spinner.set_visibility(False)

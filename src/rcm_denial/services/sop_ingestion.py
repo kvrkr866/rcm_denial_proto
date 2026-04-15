@@ -371,11 +371,46 @@ def ingest_sop_documents(
         return 0
 
 
-def ingest_all_payer_sops(run_verify: bool = False) -> dict[str, int]:
+def _is_collection_fresh(payer_key: str, payer_dir: Path) -> bool:
+    """
+    Check if a payer's collection is already indexed and up-to-date.
+    Returns True if we can skip re-indexing.
+    """
+    manifest = read_manifest()
+    entry = manifest.get("payers", {}).get(payer_key)
+    if not entry:
+        return False
+    if entry.get("status") not in ("ok",):
+        return False
+    if entry.get("document_count", 0) == 0:
+        return False
+
+    # Check if any SOP file is newer than the indexed_at timestamp
+    indexed_at = entry.get("indexed_at", "")
+    if not indexed_at:
+        return False
+
+    try:
+        from datetime import datetime as dt
+        idx_time = dt.fromisoformat(indexed_at)
+        for f in payer_dir.rglob("*"):
+            if f.is_file() and f.suffix in (".txt", ".pdf", ".md"):
+                file_mtime = dt.fromtimestamp(f.stat().st_mtime)
+                if file_mtime > idx_time:
+                    return False  # file is newer than index
+        return True  # all files older than index
+    except Exception:
+        return False
+
+
+def ingest_all_payer_sops(run_verify: bool = False, force: bool = False) -> dict[str, int]:
     """
     Scans data/sop_documents/ for payer subdirectories and indexes each one.
     Updates the manifest with every payer's result.
     Always indexes 'global' first.
+
+    Skips payers whose collections are already indexed and up-to-date
+    (unless force=True).
 
     Returns a dict of {payer_key: documents_indexed}.
     """
@@ -385,10 +420,17 @@ def ingest_all_payer_sops(run_verify: bool = False) -> dict[str, int]:
     sop_root.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, int] = {}
+    skipped: list[str] = []
 
     global_dir = sop_root / "global"
     global_dir.mkdir(exist_ok=True)
-    results["global"] = ingest_sop_documents("global", run_verify=run_verify)
+    if not force and _is_collection_fresh("global", global_dir):
+        manifest = read_manifest()
+        results["global"] = manifest.get("payers", {}).get("global", {}).get("document_count", 0)
+        skipped.append("global")
+        logger.info("SOP collection already fresh — skipping", payer_key="global")
+    else:
+        results["global"] = ingest_sop_documents("global", run_verify=run_verify)
 
     for payer_dir in sorted(sop_root.iterdir()):
         if not payer_dir.is_dir():
@@ -396,14 +438,23 @@ def ingest_all_payer_sops(run_verify: bool = False) -> dict[str, int]:
         payer_key = payer_dir.name
         if payer_key == "global":
             continue
-        count = ingest_sop_documents(payer_key, documents_dir=payer_dir, run_verify=run_verify)
-        results[payer_key] = count
+
+        if not force and _is_collection_fresh(payer_key, payer_dir):
+            manifest = read_manifest()
+            results[payer_key] = manifest.get("payers", {}).get(payer_key, {}).get("document_count", 0)
+            skipped.append(payer_key)
+            logger.info("SOP collection already fresh — skipping", payer_key=payer_key)
+        else:
+            count = ingest_sop_documents(payer_key, documents_dir=payer_dir, run_verify=run_verify)
+            results[payer_key] = count
 
     total = sum(results.values())
     logger.info(
         "All payer SOP ingestions complete",
         payer_count=len(results),
         total_documents=total,
+        skipped=skipped,
+        rebuilt=len(results) - len(skipped),
     )
     return results
 

@@ -73,6 +73,45 @@ def dashboard_page():
 
         ui.timer(0.1, load_stats, once=True)
 
+        # ── Clear History (dev/demo only) ──────────────────────
+        ui.separator()
+        with ui.row().classes("w-full items-center gap-4"):
+            ui.label("Demo Tools").classes("text-sm font-semibold text-gray-500")
+
+            async def clear_data():
+                with ui.dialog() as confirm, ui.card().classes("w-80"):
+                    ui.label("Clear All Demo Data?").classes("text-lg font-semibold")
+                    ui.label(
+                        "This will delete all processed claims, audit logs, "
+                        "review queue items, submission logs, and output files. "
+                        "SOP collections will be preserved."
+                    ).classes("text-sm text-gray-600")
+                    with ui.row().classes("gap-2 justify-end mt-4"):
+                        ui.button("Cancel", on_click=confirm.close).props("flat")
+
+                        async def do_clear():
+                            try:
+                                from rcm_denial.services.data_cleanup import clear_all_data
+                                result = clear_all_data()
+                                ui.notify(
+                                    f"Cleared: {result.get('db_tables_cleared', 0)} tables, "
+                                    f"{result.get('output_dirs_removed', 0)} output dirs",
+                                    type="positive",
+                                )
+                                confirm.close()
+                                await load_stats()
+                            except Exception as exc:
+                                ui.notify(f"Error: {exc}", type="negative")
+
+                        ui.button("Clear All", icon="delete_forever",
+                                  on_click=do_clear).props("color=red")
+                confirm.open()
+
+            ui.button("Clear History", icon="delete_sweep",
+                      on_click=clear_data) \
+                .props("flat color=red dense size=sm no-caps") \
+                .tooltip("Delete all processed claims, logs, and output files")
+
     create_footer()
 
 

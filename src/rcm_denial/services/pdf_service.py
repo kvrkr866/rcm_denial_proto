@@ -295,6 +295,163 @@ def generate_appeal_letter_pdf(state, output_path: Path) -> Path:
         raise
 
 
+def generate_cover_letter_pdf(state, output_path: Path) -> Path:
+    """
+    Generates a cover letter PDF for the submission package.
+
+    This is the FIRST page of the submission bundle. It clearly states:
+    - Whether this is a RESUBMISSION or APPEAL
+    - What the problem was (denial reason, CARC/RARC)
+    - How it was addressed (per SOP guidelines)
+    - What documents are enclosed
+    """
+    try:
+        colors, letter_size, getSampleStyleSheet, ParagraphStyle, inch, SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable = _get_canvas_and_styles()
+
+        doc = SimpleDocTemplate(str(output_path), pagesize=letter_size,
+                                rightMargin=inch, leftMargin=inch,
+                                topMargin=0.75*inch, bottomMargin=0.75*inch)
+        styles = getSampleStyleSheet()
+        story = []
+
+        h1 = ParagraphStyle('H1', parent=styles['Title'], fontSize=16, spaceAfter=6, alignment=1)
+        h2 = ParagraphStyle('H2', parent=styles['Heading2'], fontSize=12, spaceBefore=10, spaceAfter=4)
+        body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10, leading=14, spaceAfter=5)
+        bold = ParagraphStyle('Bold', parent=styles['Normal'], fontSize=10, fontName='Helvetica-Bold', spaceAfter=3)
+        small = ParagraphStyle('Small', parent=styles['Normal'], fontSize=9, textColor=colors.grey, spaceAfter=3)
+
+        claim = state.claim
+        analysis = state.denial_analysis
+        routing = state.routing_decision or "unknown"
+        evidence = state.evidence_check
+
+        # Determine submission type
+        if routing in ("resubmit", "both"):
+            submission_type = "CORRECTED CLAIM RESUBMISSION"
+            type_color = colors.HexColor("#1565C0")
+        elif routing == "appeal":
+            submission_type = "FORMAL APPEAL"
+            type_color = colors.HexColor("#C62828")
+        elif routing == "write_off":
+            submission_type = "WRITE-OFF DOCUMENTATION"
+            type_color = colors.grey
+        else:
+            submission_type = "DENIAL RESPONSE"
+            type_color = colors.HexColor("#2E7D32")
+
+        # Header with submission type
+        story.append(Paragraph(submission_type, ParagraphStyle(
+            'TypeHeader', parent=h1, textColor=type_color, fontSize=18,
+        )))
+        story.append(Paragraph("Cover Letter and Submission Summary", small))
+        story.append(HRFlowable(width="100%", thickness=2, color=type_color))
+        story.append(Spacer(1, 0.15*inch))
+
+        # Claim reference table
+        story.append(Paragraph("Claim Reference", h2))
+        ref_data = [
+            ["Claim ID",        claim.claim_id],
+            ["Patient",         f"{claim.patient_name or claim.patient_id} (Member: {claim.member_id or claim.patient_id})"],
+            ["Payer",           f"{claim.payer_name or claim.payer_id}"],
+            ["Provider",        f"{claim.rendering_provider or claim.provider_id} (NPI: {claim.provider_npi or claim.provider_id})"],
+            ["Date of Service", str(claim.date_of_service)],
+            ["Denial Date",     str(claim.denial_date)],
+            ["Billed Amount",   f"${claim.billed_amount:,.2f}"],
+            ["CARC Code",       f"{claim.carc_code}"],
+            ["RARC Code",       f"{claim.rarc_code or 'N/A'}"],
+        ]
+        tbl = Table(ref_data, colWidths=[1.8*inch, 4.7*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#E3F2FD')),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#BBDEFB')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 0.15*inch))
+
+        # Problem statement
+        story.append(Paragraph("Problem Identified", h2))
+        if analysis:
+            story.append(Paragraph(f"<b>Denial Category:</b> {analysis.denial_category.replace('_', ' ').title()}", body))
+            story.append(Paragraph(f"<b>Root Cause:</b> {analysis.root_cause}", body))
+            story.append(Paragraph(f"<b>CARC Interpretation:</b> {analysis.carc_interpretation}", body))
+            if claim.denial_reason:
+                story.append(Paragraph(f"<b>Payer Stated Reason:</b> {claim.denial_reason}", body))
+        else:
+            story.append(Paragraph(f"Denial reason: {claim.denial_reason or 'Not specified'}", body))
+
+        # Resolution per SOP
+        story.append(Paragraph("Resolution Applied (per Payer SOP)", h2))
+        story.append(Paragraph(f"<b>Recommended Action:</b> {routing.upper()}", bold))
+        if analysis:
+            story.append(Paragraph(f"<b>AI Confidence:</b> {analysis.confidence_score:.0%}", body))
+            story.append(Paragraph(f"<b>Reasoning:</b> {analysis.reasoning}", body))
+
+        if evidence:
+            story.append(Spacer(1, 0.05*inch))
+            story.append(Paragraph(f"<b>Evidence Sufficient:</b> {'Yes' if evidence.evidence_sufficient else 'No'}", body))
+            if evidence.key_arguments:
+                story.append(Paragraph("<b>Key Arguments:</b>", bold))
+                for arg in evidence.key_arguments:
+                    story.append(Paragraph(f"  - {arg}", body))
+            if evidence.evidence_gaps:
+                story.append(Paragraph("<b>Evidence Gaps:</b>", bold))
+                for gap in evidence.evidence_gaps:
+                    story.append(Paragraph(f"  - {gap}", body))
+
+        # Correction details (if resubmission)
+        if state.correction_plan and routing in ("resubmit", "both"):
+            plan = state.correction_plan
+            story.append(Paragraph("Corrections Applied", h2))
+            if plan.code_corrections:
+                for cc in plan.code_corrections:
+                    story.append(Paragraph(
+                        f"  {cc.code_type}: {cc.original_code} -> {cc.corrected_code} ({cc.reason})", body
+                    ))
+            if plan.resubmission_instructions:
+                story.append(Paragraph("<b>Resubmission Steps:</b>", bold))
+                for i, instr in enumerate(plan.resubmission_instructions, 1):
+                    story.append(Paragraph(f"  {i}. {instr}", body))
+
+        # Documents enclosed
+        story.append(Paragraph("Documents Enclosed in This Package", h2))
+        enc_items = ["This cover letter"]
+        if analysis:
+            enc_items.append("Denial analysis report")
+        if state.correction_plan and routing in ("resubmit", "both"):
+            enc_items.append("Correction plan with code changes")
+        if state.appeal_package and routing in ("appeal", "both"):
+            enc_items.append("Formal appeal letter with clinical justification")
+        if state.appeal_package and state.appeal_package.supporting_documents:
+            for sdoc in state.appeal_package.supporting_documents:
+                enc_items.append(f"{sdoc.document_name} ({sdoc.document_type})")
+        enc_items.append("Supporting medical records (as referenced)")
+
+        for i, item in enumerate(enc_items, 1):
+            story.append(Paragraph(f"  {i}. {item}", body))
+
+        # Footer
+        story.append(Spacer(1, 0.3*inch))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.grey))
+        story.append(Paragraph(
+            f"Generated by RCM Denial Management System on {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}. "
+            f"Batch: {state.batch_id or 'N/A'}  |  Run: {state.run_id}",
+            small,
+        ))
+
+        doc.build(story)
+        logger.info("Cover letter PDF generated", path=str(output_path))
+        return output_path
+
+    except Exception as exc:
+        logger.error("Failed to generate cover letter PDF", error=str(exc))
+        raise
+
+
 def merge_pdfs(pdf_paths: list[Path], output_path: Path) -> Path:
     """Merges multiple PDFs into a single submission package."""
     try:

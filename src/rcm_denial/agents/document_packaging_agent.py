@@ -24,6 +24,7 @@ from rcm_denial.services.pdf_service import (
     generate_analysis_report_pdf,
     generate_appeal_letter_pdf,
     generate_correction_plan_pdf,
+    generate_cover_letter_pdf,
     merge_pdfs,
 )
 
@@ -129,14 +130,26 @@ def document_packaging_agent(state: DenialWorkflowState) -> DenialWorkflowState:
     try:
         from rcm_denial.config.settings import settings
 
-        # Create per-claim output directory
+        # Create per-claim output directory with two sub-folders
         output_dir = settings.output_dir / claim.claim_id
-        output_dir.mkdir(parents=True, exist_ok=True)
+        package_dir = output_dir / "package"
+        audit_dir = output_dir / "internal_audit"
+        package_dir.mkdir(parents=True, exist_ok=True)
+        audit_dir.mkdir(parents=True, exist_ok=True)
 
         generated_pdfs: list[Path] = []
 
-        # 1. Analysis report PDF (always generated)
-        analysis_pdf_path = output_dir / "01_denial_analysis.pdf"
+        # 1. Cover letter (FIRST page of submission bundle)
+        cover_pdf_path = package_dir / "00_cover_letter.pdf"
+        try:
+            generate_cover_letter_pdf(state, cover_pdf_path)
+            generated_pdfs.append(cover_pdf_path)
+        except Exception as exc:
+            logger.warning("Cover letter PDF failed", error=str(exc))
+            state.add_error(f"Cover letter PDF failed: {exc}")
+
+        # 2. Analysis report PDF (always generated)
+        analysis_pdf_path = package_dir / "01_denial_analysis.pdf"
         try:
             generate_analysis_report_pdf(state, analysis_pdf_path)
             generated_pdfs.append(analysis_pdf_path)
@@ -144,9 +157,9 @@ def document_packaging_agent(state: DenialWorkflowState) -> DenialWorkflowState:
             logger.warning("Analysis report PDF failed", error=str(exc))
             state.add_error(f"Analysis PDF generation failed: {exc}")
 
-        # 2. Correction plan PDF (if resubmission path)
+        # 3. Correction plan PDF (if resubmission path)
         if state.correction_plan:
-            correction_pdf_path = output_dir / "02_correction_plan.pdf"
+            correction_pdf_path = package_dir / "02_correction_plan.pdf"
             try:
                 generate_correction_plan_pdf(state, correction_pdf_path)
                 generated_pdfs.append(correction_pdf_path)
@@ -154,9 +167,9 @@ def document_packaging_agent(state: DenialWorkflowState) -> DenialWorkflowState:
                 logger.warning("Correction plan PDF failed", error=str(exc))
                 state.add_error(f"Correction plan PDF failed: {exc}")
 
-        # 3. Appeal letter PDF (if appeal path)
+        # 4. Appeal letter PDF (if appeal path)
         if state.appeal_package:
-            appeal_pdf_path = output_dir / "03_appeal_letter.pdf"
+            appeal_pdf_path = package_dir / "03_appeal_letter.pdf"
             try:
                 generate_appeal_letter_pdf(state, appeal_pdf_path)
                 generated_pdfs.append(appeal_pdf_path)
@@ -164,21 +177,21 @@ def document_packaging_agent(state: DenialWorkflowState) -> DenialWorkflowState:
                 logger.warning("Appeal letter PDF failed", error=str(exc))
                 state.add_error(f"Appeal letter PDF failed: {exc}")
 
-        # 4. Merge into final package
+        # 5. Merge into final submission package
         final_pdf_path = None
         if generated_pdfs:
-            final_pdf_path = output_dir / f"SUBMISSION_PACKAGE_{claim.claim_id}.pdf"
+            final_pdf_path = package_dir / f"SUBMISSION_PACKAGE_{claim.claim_id}.pdf"
             try:
                 merge_pdfs(generated_pdfs, final_pdf_path)
             except Exception as exc:
                 logger.warning("PDF merge failed — individual PDFs preserved", error=str(exc))
                 final_pdf_path = generated_pdfs[0] if generated_pdfs else None
 
-        # 5. Write metadata and audit log
-        metadata_path = _write_metadata_json(state, output_dir)
-        audit_path = _write_audit_log(state, output_dir)
+        # 6. Write internal audit data (NOT submitted to payer)
+        metadata_path = _write_metadata_json(state, audit_dir)
+        audit_path = _write_audit_log(state, audit_dir)
 
-        # 6. Build SubmissionPackage
+        # 7. Build SubmissionPackage
         duration_ms = (time.perf_counter() - start) * 1000
         pkg_type = _determine_package_type(state)
         status = "complete" if not state.errors else ("partial" if generated_pdfs else "failed")

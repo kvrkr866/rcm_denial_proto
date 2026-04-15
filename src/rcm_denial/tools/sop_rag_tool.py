@@ -333,11 +333,35 @@ def _load_sop_files(payer_dir: Path) -> list[dict]:
                     documents.append(raw)
 
             elif ext == ".pdf":
+                content = None
+                # Strategy 1: PyMuPDF (fast, accurate for digital PDFs)
                 try:
-                    import pytesseract
-                    from pdf2image import convert_from_path
-                    pages = convert_from_path(str(filepath), dpi=200)
-                    content = "\n".join(pytesseract.image_to_string(p) for p in pages)
+                    import fitz
+                    doc = fitz.open(str(filepath))
+                    pages_text = [page.get_text() for page in doc]
+                    doc.close()
+                    text = "\n".join(pages_text).strip()
+                    if len(text) >= 50:
+                        content = text
+                except ImportError:
+                    pass
+                except Exception:
+                    pass
+
+                # Strategy 2: Tesseract fallback (scanned PDFs)
+                if content is None:
+                    try:
+                        import pytesseract
+                        from pdf2image import convert_from_path
+                        pages = convert_from_path(str(filepath), dpi=200)
+                        content = "\n".join(pytesseract.image_to_string(p) for p in pages)
+                    except ImportError:
+                        logger.warning("PDF extraction unavailable — skipping SOP PDF",
+                                       file=filepath.name)
+                    except Exception as pdf_exc:
+                        logger.warning("PDF extraction failed", file=filepath.name, error=str(pdf_exc))
+
+                if content:
                     documents.append({
                         "title": filepath.stem.replace("_", " ").title(),
                         "content": content,
@@ -346,8 +370,6 @@ def _load_sop_files(payer_dir: Path) -> list[dict]:
                         "payer_ids": [],
                         "file_path": str(filepath),
                     })
-                except ImportError:
-                    logger.warning("PDF OCR unavailable — skipping SOP PDF", file=filepath.name)
 
         except Exception as exc:
             logger.warning("Failed to load SOP file", file=str(filepath), error=str(exc))

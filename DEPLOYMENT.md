@@ -247,13 +247,17 @@ gcloud run deploy rcm-denial \
 ## Demo Script (suggested flow)
 
 1. **Login** — show the auth screen, login as admin
-2. **Dashboard** — show overview metrics (empty at start)
-3. **Init SOPs** — click "Init SOPs" button, show 3 payer collections built
+2. **Dashboard** — click **Clear History** to reset any previous demo data
+3. **Init SOPs** — click "Init SOPs" button; show 3 payer + global collections (skips if already fresh)
 4. **Upload CSV** — upload `demo_denials.csv`, show 4 claims appear in Pending panel
-5. **Process** — click "Process All", watch claims move through pipeline stages live
-6. **Review** — go to Review Queue, show 4 claims with AI summaries
+5. **Select & Process** — select specific claims or click "Process All", watch pipeline stages light up live
+6. **Review** — go to Review Queue > Pending Review tab, show claims with AI summaries
 7. **Approve** — approve one claim, show it move to "approved"
 8. **Re-route** — re-route one claim with reviewer notes, show it re-enter pipeline
-9. **View detail** — click a claim ID, show full analysis, appeal letter, audit trail, PDF download
-10. **Stats** — show scorecard with LLM cost, pipeline results, eval quality signals
-11. **Evals** — run golden dataset checks, show 14/14 pass
+9. **Submit** — go to Ready to Submit tab, click "Submit to Payer" on approved claims
+10. **View detail** — click a claim ID, show:
+    - Submission Package (cover letter + analysis + correction/appeal PDFs)
+    - Internal Audit Data (audit_log.json, submission_metadata.json)
+    - Appeal letter preview, evidence assessment, audit trail timeline
+11. **Stats** — show operational metrics: claims per CARC code, processing time, review outcomes, write-off impact, recovery rate
+12. **Evals** — Accuracy Check tab: run golden dataset, show 14/14 pass; Quality Signals tab: first-pass approval rate

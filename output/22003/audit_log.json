@@ -1,10 +1,10 @@
 {
   "claim_id": "22003",
-  "run_id": "473f41b7e28f1a30",
-  "batch_id": "errcheck2",
+  "run_id": "a430ebc11dd9b1e8",
+  "batch_id": "phase1-test",
   "entries": [
     {
-      "timestamp": "2026-04-13 19:43:06.008311",
+      "timestamp": "2026-04-14 14:56:54.691877",
       "node_name": "intake_agent",
       "claim_id": "22003",
       "status": "started",
@@ -14,17 +14,17 @@
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:06.009764",
+      "timestamp": "2026-04-14 14:56:54.694721",
       "node_name": "intake_agent",
       "claim_id": "22003",
       "status": "completed",
       "details": "Data errors: 1 | Business flags: 3 | CARC: 16 | Payer: Crestview Health Plans | Specialty: Spine Surgery | Priority: HIGH | Days to deadline: 132 | Requires auth: True | Prior appeals: 0",
-      "duration_ms": 25.5199009552598,
+      "duration_ms": 3.991686040535569,
       "token_usage": null,
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:06.011159",
+      "timestamp": "2026-04-14 14:56:54.696018",
       "node_name": "enrichment_agent",
       "claim_id": "22003",
       "status": "started",
@@ -34,17 +34,17 @@
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:38.209172",
+      "timestamp": "2026-04-14 14:57:58.414386",
       "node_name": "enrichment_agent",
       "claim_id": "22003",
       "status": "completed",
       "details": "Enrichment complete. Patient: OK, Payer: OK, EHR: OK, EOB: OK, SOP: 3 results",
-      "duration_ms": 31375.331601011567,
+      "duration_ms": 66404.54712801147,
       "token_usage": null,
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:38.210600",
+      "timestamp": "2026-04-14 14:57:58.416089",
       "node_name": "analysis_agent",
       "claim_id": "22003",
       "status": "started",
@@ -54,18 +54,18 @@
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:54.268129",
+      "timestamp": "2026-04-14 14:57:58.416174",
       "node_name": "analysis_agent",
       "claim_id": "22003",
       "status": "completed",
-      "details": "Action: appeal, Category: prior_auth, Confidence: 0.90",
-      "duration_ms": 15223.710242076777,
+      "details": "Action: resubmit | Category: coding_error | Confidence: 0.95 | Missing items: 1",
+      "duration_ms": 0.23440108634531498,
       "token_usage": null,
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:54.270610",
-      "node_name": "appeal_prep_agent",
+      "timestamp": "2026-04-14 14:57:58.417741",
+      "node_name": "evidence_check_agent",
       "claim_id": "22003",
       "status": "started",
       "details": "",
@@ -74,17 +74,37 @@
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:59.025535",
-      "node_name": "appeal_prep_agent",
+      "timestamp": "2026-04-14 14:58:03.948558",
+      "node_name": "evidence_check_agent",
       "claim_id": "22003",
       "status": "completed",
-      "details": "Appeal letter generated, 2 supporting docs (1 attached), Deadline: 2026-03-27, Urgent: True",
-      "duration_ms": 4755.016888026148,
+      "details": "Evidence sufficient: True | Gaps: 0 | Arguments: 4 | Needs EHR fetch: False | Action confirmed: resubmit",
+      "duration_ms": 5531.132161966525,
       "token_usage": null,
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:43:59.027150",
+      "timestamp": "2026-04-14 14:58:03.950594",
+      "node_name": "response_agent",
+      "claim_id": "22003",
+      "status": "started",
+      "details": "",
+      "duration_ms": null,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-14 14:58:09.978439",
+      "node_name": "response_agent",
+      "claim_id": "22003",
+      "status": "completed",
+      "details": "Action: resubmit | Correction plan: yes | Appeal package: no | Supporting docs: 0",
+      "duration_ms": 6028.065915917978,
+      "token_usage": null,
+      "metadata": {}
+    },
+    {
+      "timestamp": "2026-04-14 14:58:09.980573",
       "node_name": "document_packaging_agent",
       "claim_id": "22003",
       "status": "started",
@@ -94,12 +114,12 @@
       "metadata": {}
     },
     {
-      "timestamp": "2026-04-13 19:44:03.388816",
+      "timestamp": "2026-04-14 14:58:15.121582",
       "node_name": "document_packaging_agent",
       "claim_id": "22003",
       "status": "completed",
-      "details": "Package: appeal, Status: partial, PDFs: 2",
-      "duration_ms": 4361.598781077191,
+      "details": "Package: resubmission, Status: partial, PDFs: 2",
+      "duration_ms": 5140.983809018508,
       "token_usage": null,
       "metadata": {}
     }

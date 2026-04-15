@@ -1,0 +1,148 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RCM Denial Management — Observability Stack
+#
+# Services:
+#   prometheus    — scrapes rcm_denial.prom + Pushgateway
+#   pushgateway   — receives metrics pushed after each batch
+#   grafana       — dashboards (import grafana_dashboard.json)
+#   loki          — log aggregation
+#   promtail      — ships ./logs/*.log to Loki
+#
+# Usage:
+#   docker compose -f data/observability/docker-compose.yml up -d
+#   open http://localhost:3000   (Grafana, admin/admin)
+#   open http://localhost:9091   (Pushgateway)
+#   open http://localhost:9090   (Prometheus)
+#
+# After batch runs:
+#   rcm-denial stats --export-metrics --push-gateway http://localhost:9091
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+networks:
+  rcm_obs:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+services:
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: rcm_prometheus
+    restart: unless-stopped
+    networks: [rcm_obs]
+    ports:
+      - "9090:9090"
+    volumes:
+      # Mount the prometheus config from this directory
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Mount the metrics textfile directory so Prometheus can read .prom files
+      # via node_exporter — see node_exporter service below
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Prometheus Pushgateway ─────────────────────────────────────────────────
+  # Receives metrics pushed by: rcm-denial stats --push-gateway http://localhost:9091
+  pushgateway:
+    image: prom/pushgateway:v1.8.0
+    container_name: rcm_pushgateway
+    restart: unless-stopped
+    networks: [rcm_obs]
+    ports:
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9091/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── node_exporter (textfile collector) ────────────────────────────────────
+  # Reads data/metrics/rcm_denial.prom and exposes it to Prometheus.
+  # The pipeline writes this file automatically after each batch.
+  node_exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: rcm_node_exporter
+    restart: unless-stopped
+    networks: [rcm_obs]
+    ports:
+      - "9100:9100"
+    volumes:
+      # Mount the metrics directory — node_exporter reads *.prom files from here
+      - ../../data/metrics:/var/lib/node_exporter/textfile_collector:ro
+    command:
+      - "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector"
+      - "--collector.disable-defaults"
+      - "--collector.textfile"
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: rcm_grafana
+    restart: unless-stopped
+    networks: [rcm_obs]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Auto-provision Prometheus datasource
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana_provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ── Loki ───────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:2.9.5
+    container_name: rcm_loki
+    restart: unless-stopped
+    networks: [rcm_obs]
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ── Promtail ───────────────────────────────────────────────────────────────
+  # Ships ./logs/*.log to Loki. Reads the config from promtail_config.yaml.
+  promtail:
+    image: grafana/promtail:2.9.5
+    container_name: rcm_promtail
+    restart: unless-stopped
+    networks: [rcm_obs]
+    volumes:
+      - ./promtail_config.yaml:/etc/promtail/config.yaml:ro
+      # Mount the project log and output directories
+      - ../../logs:/app/logs:ro
+      - ../../output:/app/output:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki

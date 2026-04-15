@@ -39,23 +39,23 @@ logger = get_logger(__name__)
 NODE_NAME = "enrichment_agent"
 
 
-async def _fetch_patient(patient_id: str) -> tuple[str, Any]:
+async def _fetch_patient(patient_id: str, claim: Any) -> tuple[str, Any]:
     try:
-        return "patient", get_patient_data(patient_id)
+        return "patient", get_patient_data(patient_id, claim=claim)
     except Exception as exc:
         return "patient_error", str(exc)
 
 
-async def _fetch_payer(payer_id: str, cpt_codes: list[str]) -> tuple[str, Any]:
+async def _fetch_payer(payer_id: str, cpt_codes: list[str], claim: Any) -> tuple[str, Any]:
     try:
-        return "payer", get_payer_policy(payer_id, cpt_codes)
+        return "payer", get_payer_policy(payer_id, cpt_codes, claim=claim)
     except Exception as exc:
         return "payer_error", str(exc)
 
 
-async def _fetch_ehr(provider_id: str, patient_id: str, date_of_service: Any) -> tuple[str, Any]:
+async def _fetch_ehr(provider_id: str, patient_id: str, date_of_service: Any, claim: Any) -> tuple[str, Any]:
     try:
-        return "ehr", get_ehr_records(provider_id, patient_id, date_of_service)
+        return "ehr", get_ehr_records(provider_id, patient_id, date_of_service, claim=claim)
     except Exception as exc:
         return "ehr_error", str(exc)
 
@@ -79,9 +79,9 @@ async def _enrich_async(state: DenialWorkflowState) -> EnrichedData:
     claim = state.claim
 
     results = await asyncio.gather(
-        _fetch_patient(claim.patient_id),
-        _fetch_payer(claim.payer_id, claim.cpt_codes),
-        _fetch_ehr(claim.provider_id, claim.patient_id, claim.date_of_service),
+        _fetch_patient(claim.patient_id, claim),
+        _fetch_payer(claim.payer_id, claim.cpt_codes, claim),
+        _fetch_ehr(claim.provider_id, claim.patient_id, claim.date_of_service, claim),
         _fetch_eob(claim.eob_pdf_path),
         _fetch_sop(claim.carc_code, claim.rarc_code, claim.payer_id),
         return_exceptions=False,
@@ -163,6 +163,21 @@ def enrichment_agent(state: DenialWorkflowState) -> DenialWorkflowState:
             enriched = asyncio.run(_enrich_async(state))
 
         state.enriched_data = enriched
+
+        # Gap 1 fix: populate denial_reason from EOB OCR output.
+        # ClaimRecord.denial_reason is None at intake; EOB extraction
+        # is the authoritative source for the human-readable denial text.
+        if (
+            not state.claim.denial_reason
+            and enriched.eob_data
+            and enriched.eob_data.denial_remarks
+        ):
+            state.claim.denial_reason = "; ".join(enriched.eob_data.denial_remarks)
+            logger.info(
+                "denial_reason populated from EOB OCR",
+                claim_id=state.claim.claim_id,
+                denial_reason=state.claim.denial_reason[:100],
+            )
 
         # Propagate enrichment errors to main error list
         for err in enriched.enrichment_errors:

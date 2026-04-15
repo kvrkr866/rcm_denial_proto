@@ -234,6 +234,35 @@ class EhrDocument(BaseModel):
     is_available: bool = True
 
 
+# Gap 8 — DiagnosticReport: lab results, imaging studies, pathology reports
+# Maps to FHIR DiagnosticReport / Observation / ImagingStudy resources.
+class DiagnosticReport(BaseModel):
+    """
+    A single diagnostic report (lab, imaging, pathology, or cardiology).
+
+    FHIR mapping:
+      DiagnosticReport.category → report_category
+      DiagnosticReport.code.text → report_name
+      DiagnosticReport.effectiveDateTime → report_date
+      DiagnosticReport.conclusion → conclusion
+      DiagnosticReport.result (Observation refs) → key_findings
+      ImagingStudy.series[].modality → modality
+    """
+    report_id: str = ""
+    report_category: str  # "lab" | "imaging" | "pathology" | "cardiology" | "other"
+    report_name: str      # e.g. "CBC with Differential", "MRI Brain w/o contrast"
+    report_date: Optional[date] = None
+    ordering_provider: Optional[str] = None
+    performing_lab_or_facility: Optional[str] = None
+    conclusion: str = ""              # narrative summary / impression
+    key_findings: list[str] = Field(default_factory=list)   # bullet list of significant results
+    abnormal_flags: list[str] = Field(default_factory=list) # flagged abnormal values
+    modality: Optional[str] = None    # imaging only: "MRI" | "CT" | "X-RAY" | "US" | etc.
+    is_available: bool = True
+    source: str = "EHR"               # "EHR" | "OCR" | "manual"
+    content_summary: str = ""         # full text snippet for RAG / LLM context
+
+
 class EhrData(BaseModel):
     patient_id: str
     provider_id: str
@@ -241,7 +270,11 @@ class EhrData(BaseModel):
     procedure_details: list[EhrDocument] = Field(default_factory=list)
     prior_auth_records: list[EhrDocument] = Field(default_factory=list)
     diagnosis_justifications: list[EhrDocument] = Field(default_factory=list)
+    # Gap 12 — Stage 2 targeted fetch: lab / imaging / pathology reports
+    diagnostic_reports: list[DiagnosticReport] = Field(default_factory=list)
     retrieved_at: datetime = Field(default_factory=datetime.utcnow)
+    # Tracks whether Stage 2 targeted fetch has been performed
+    stage2_fetched: bool = False
 
     @property
     def has_auth_documentation(self) -> bool:
@@ -250,6 +283,10 @@ class EhrData(BaseModel):
     @property
     def has_encounter_notes(self) -> bool:
         return any(d.is_available for d in self.encounter_notes)
+
+    @property
+    def has_diagnostic_reports(self) -> bool:
+        return any(r.is_available for r in self.diagnostic_reports)
 
 
 # ------------------------------------------------------------------ #

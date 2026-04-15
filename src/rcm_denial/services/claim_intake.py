@@ -113,7 +113,7 @@ def _get_db_path() -> Path:
 
 
 def _init_db() -> None:
-    """Creates the claim_intake_log table if it does not exist."""
+    """Creates all required tables if they do not exist."""
     with sqlite3.connect(_get_db_path()) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS claim_intake_log (
@@ -126,6 +126,58 @@ def _init_db() -> None:
                 rejection_reasons  TEXT,                -- JSON array of error strings
                 raw_data           TEXT,                -- JSON of original CSV row
                 recorded_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS claim_audit_log (
+                id                 INTEGER  PRIMARY KEY AUTOINCREMENT,
+                batch_id           TEXT,
+                run_id             TEXT,
+                claim_id           TEXT     NOT NULL,
+                node_name          TEXT     NOT NULL,
+                status             TEXT     NOT NULL,   -- 'started'|'completed'|'failed'|'skipped'
+                details            TEXT,
+                duration_ms        REAL,
+                token_usage        TEXT,                -- JSON dict
+                recorded_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS claim_pipeline_result (
+                id                 INTEGER  PRIMARY KEY AUTOINCREMENT,
+                batch_id           TEXT,
+                run_id             TEXT,
+                claim_id           TEXT     NOT NULL,
+                carc_code          TEXT,
+                denial_category    TEXT,
+                recommended_action TEXT,
+                final_status       TEXT,                -- 'complete'|'partial'|'failed'
+                package_type       TEXT,
+                errors             TEXT,                -- JSON array
+                pipeline_errors    TEXT,                -- JSON array from state.errors
+                duration_ms        REAL,
+                llm_calls          INTEGER  DEFAULT 0,
+                recorded_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Gap 37 — medical record source registry
+        # Tracks how to reach each provider's EHR/EMR: REST API, FHIR, RPA portal, or manual.
+        # One row per provider_id; updated whenever connectivity is (re)verified.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS medical_record_source_registry (
+                id                 INTEGER  PRIMARY KEY AUTOINCREMENT,
+                provider_id        TEXT     NOT NULL UNIQUE,
+                provider_name      TEXT,
+                access_method      TEXT     NOT NULL DEFAULT 'mock',
+                                             -- 'mock' | 'fhir_r4' | 'epic_api' | 'cerner_api'
+                                             -- | 'athena_api' | 'rpa_portal' | 'manual'
+                endpoint_url       TEXT,     -- base URL for REST/FHIR calls
+                credentials_ref    TEXT,     -- key name in secrets manager / .env
+                last_verified_at   TIMESTAMP,
+                last_verified_ok   INTEGER  DEFAULT 1,  -- 1 = healthy, 0 = error
+                notes              TEXT,
+                registered_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         conn.commit()
@@ -608,3 +660,230 @@ def get_intake_report(
             for r in rejected_rows
         ],
     }
+
+
+# ------------------------------------------------------------------ #
+# Audit log persistence (Gap 41)
+# ------------------------------------------------------------------ #
+
+def persist_audit_log(
+    *,
+    batch_id: str,
+    run_id: str,
+    claim_id: str,
+    audit_entries: list,
+) -> None:
+    """
+    Writes pipeline audit entries for one claim to claim_audit_log.
+    Called after each claim completes processing.
+
+    Args:
+        batch_id:     Batch identifier.
+        run_id:       Unique run ID for this claim.
+        claim_id:     Claim being processed.
+        audit_entries: List of AuditEntry objects from state.audit_log.
+    """
+    _init_db()
+    rows = []
+    for entry in audit_entries:
+        rows.append((
+            batch_id,
+            run_id,
+            claim_id,
+            entry.node_name,
+            entry.status,
+            entry.details,
+            entry.duration_ms,
+            json.dumps(entry.token_usage) if entry.token_usage else None,
+        ))
+
+    with sqlite3.connect(_get_db_path()) as conn:
+        conn.executemany(
+            """
+            INSERT INTO claim_audit_log
+                (batch_id, run_id, claim_id, node_name, status,
+                 details, duration_ms, token_usage)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        conn.commit()
+
+
+def persist_pipeline_result(
+    *,
+    batch_id: str,
+    run_id: str,
+    claim_id: str,
+    carc_code: str,
+    denial_category: str,
+    recommended_action: str,
+    final_status: str,
+    package_type: str,
+    errors: list[str],
+    pipeline_errors: list[str],
+    duration_ms: float,
+    llm_calls: int = 0,
+) -> None:
+    """
+    Writes the pipeline outcome for one claim to claim_pipeline_result.
+    Enables batch statistics and cross-batch historical reporting.
+    """
+    _init_db()
+    with sqlite3.connect(_get_db_path()) as conn:
+        conn.execute(
+            """
+            INSERT INTO claim_pipeline_result
+                (batch_id, run_id, claim_id, carc_code, denial_category,
+                 recommended_action, final_status, package_type,
+                 errors, pipeline_errors, duration_ms, llm_calls)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id, run_id, claim_id, carc_code, denial_category,
+                recommended_action, final_status, package_type,
+                json.dumps(errors), json.dumps(pipeline_errors),
+                duration_ms, llm_calls,
+            ),
+        )
+        # Gap 19 — payer submission registry
+        # Maps payer_id → submission method: how to deliver the package to each payer.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS payer_submission_registry (
+                id                  INTEGER  PRIMARY KEY AUTOINCREMENT,
+                payer_id            TEXT     NOT NULL UNIQUE,
+                payer_name          TEXT,
+                submission_method   TEXT     NOT NULL DEFAULT 'mock',
+                                         -- 'mock' | 'availity_api' | 'change_healthcare_api'
+                                         -- | 'rpa_portal' | 'edi_837' | 'mail'
+                api_endpoint        TEXT,
+                credentials_ref     TEXT,    -- key in secrets manager / .env
+                portal_url          TEXT,
+                clearinghouse_id    TEXT,    -- for EDI 837 submissions
+                is_active           INTEGER  DEFAULT 1,
+                notes               TEXT,
+                registered_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Gap 25 — submission log
+        # Tracks every submission attempt per claim including retries.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS submission_log (
+                id                    INTEGER  PRIMARY KEY AUTOINCREMENT,
+                run_id                TEXT     NOT NULL,
+                claim_id              TEXT     NOT NULL,
+                batch_id              TEXT,
+                payer_id              TEXT,
+                submission_method     TEXT,
+                attempt_number        INTEGER  DEFAULT 1,
+                status                TEXT     NOT NULL,
+                                           -- 'submitted' | 'failed' | 'rejected' | 'pending'
+                response_code         TEXT,
+                response_message      TEXT,
+                confirmation_number   TEXT,
+                package_type          TEXT,
+                pdf_path              TEXT,
+                submitted_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                response_received_at  TIMESTAMP
+            )
+        """)
+        # Gap 49 — LLM cost log
+        # Tracks token usage and cost per LLM call for budget monitoring.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS llm_cost_log (
+                id              INTEGER  PRIMARY KEY AUTOINCREMENT,
+                run_id          TEXT     NOT NULL,
+                batch_id        TEXT     NOT NULL DEFAULT '',
+                agent_name      TEXT     NOT NULL,
+                model           TEXT     NOT NULL,
+                input_tokens    INTEGER  NOT NULL DEFAULT 0,
+                output_tokens   INTEGER  NOT NULL DEFAULT 0,
+                cost_usd        REAL     NOT NULL DEFAULT 0.0,
+                recorded_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+
+
+# ------------------------------------------------------------------ #
+# Gap 37 — medical_record_source_registry helpers
+# ------------------------------------------------------------------ #
+
+def register_medical_record_source(
+    *,
+    provider_id: str,
+    provider_name: str = "",
+    access_method: str = "mock",
+    endpoint_url: str = "",
+    credentials_ref: str = "",
+    notes: str = "",
+) -> None:
+    """
+    Upsert a provider's EHR connectivity record.
+
+    Called once per new provider when a batch is first processed, or
+    whenever the access method / credentials change.
+
+    access_method values:
+      'mock'       — use MockEMRAdapter (dev / test)
+      'fhir_r4'    — generic FHIR R4 REST (Epic/Cerner/Azure)
+      'epic_api'   — Epic-specific FHIR extensions
+      'cerner_api' — Cerner Millennium API
+      'athena_api' — Athena Health REST
+      'rpa_portal' — Playwright/Selenium browser automation
+      'manual'     — request records manually; pipeline proceeds without EHR
+    """
+    _init_db()
+    with sqlite3.connect(_get_db_path()) as conn:
+        conn.execute(
+            """
+            INSERT INTO medical_record_source_registry
+                (provider_id, provider_name, access_method,
+                 endpoint_url, credentials_ref, notes,
+                 last_verified_ok, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(provider_id) DO UPDATE SET
+                provider_name    = excluded.provider_name,
+                access_method    = excluded.access_method,
+                endpoint_url     = excluded.endpoint_url,
+                credentials_ref  = excluded.credentials_ref,
+                notes            = excluded.notes,
+                updated_at       = CURRENT_TIMESTAMP
+            """,
+            (provider_id, provider_name, access_method,
+             endpoint_url, credentials_ref, notes),
+        )
+        conn.commit()
+
+
+def get_medical_record_source(provider_id: str) -> dict | None:
+    """
+    Returns the registry row for a provider, or None if not registered.
+    Used by the EHR session manager to choose the correct adapter.
+    """
+    _init_db()
+    with sqlite3.connect(_get_db_path()) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM medical_record_source_registry WHERE provider_id = ?",
+            (provider_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def mark_medical_record_source_status(provider_id: str, ok: bool) -> None:
+    """Updates last_verified_ok and last_verified_at for a provider."""
+    _init_db()
+    with sqlite3.connect(_get_db_path()) as conn:
+        conn.execute(
+            """
+            UPDATE medical_record_source_registry
+               SET last_verified_ok = ?,
+                   last_verified_at = CURRENT_TIMESTAMP,
+                   updated_at       = CURRENT_TIMESTAMP
+             WHERE provider_id = ?
+            """,
+            (1 if ok else 0, provider_id),
+        )
+        conn.commit()

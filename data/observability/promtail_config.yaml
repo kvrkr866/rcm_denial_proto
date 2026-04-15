@@ -1,0 +1,117 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Promtail configuration — ships RCM Denial logs to Grafana Loki
+#
+# Usage:
+#   promtail -config.file=data/observability/promtail_config.yaml
+#
+# Prerequisites:
+#   Loki running at http://localhost:3100 (or update loki_url below)
+#   pip install promtail-client  (optional Python client alternative)
+#
+# Log format: structlog JSON — each line is a JSON object with keys:
+#   timestamp, level, event, claim_id, batch_id, run_id, ...
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  # Promtail remembers the last read position in each log file
+  filename: /tmp/promtail_positions.yaml
+
+clients:
+  - url: http://localhost:3100/loki/api/v1/push
+
+scrape_configs:
+
+  # ── RCM application logs (structlog JSON) ──────────────────────────────────
+  - job_name: rcm_denial_app
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job:         rcm_denial
+          environment: development
+          __path__:    ./logs/*.log      # relative to working dir when promtail runs
+
+    pipeline_stages:
+
+      # Parse the structlog JSON payload
+      - json:
+          expressions:
+            level:      level
+            event:      event
+            claim_id:   claim_id
+            batch_id:   batch_id
+            run_id:     run_id
+            payer_id:   payer_id
+            agent:      agent
+            timestamp:  timestamp
+
+      # Promote parsed fields to Loki labels (keep label count low)
+      - labels:
+          level:    ~
+          batch_id: ~
+
+      # Map structlog level names to Loki severity
+      - match:
+          selector: '{level="error"}'
+          stages:
+            - static_labels:
+                severity: error
+      - match:
+          selector: '{level="warning"}'
+          stages:
+            - static_labels:
+                severity: warning
+      - match:
+          selector: '{level="info"}'
+          stages:
+            - static_labels:
+                severity: info
+
+      # Extract timestamp from log payload (structlog uses ISO-8601)
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+          fallback_formats:
+            - "2006-01-02T15:04:05.999999Z07:00"
+            - "2006-01-02T15:04:05Z"
+
+  # ── Batch summary JSON files ───────────────────────────────────────────────
+  - job_name: rcm_denial_batch_summaries
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job:         rcm_denial_summary
+          environment: development
+          __path__:    ./output/batch_summary_*.json
+    pipeline_stages:
+      - json:
+          expressions:
+            batch_id:    batch_id
+            completed:   completed
+            failed:      failed
+      - labels:
+          batch_id: ~
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Loki query examples (LogQL):
+#
+#  All errors:
+#    {job="rcm_denial", level="error"}
+#
+#  Errors for a specific batch:
+#    {job="rcm_denial", batch_id="abc123"} | level="error"
+#
+#  Claim processing events:
+#    {job="rcm_denial"} | json | event=~"Claim.*"
+#
+#  Write-off events (track revenue loss):
+#    {job="rcm_denial"} | json | event="Write-off finalized"
+#
+#  LLM cost log:
+#    {job="rcm_denial"} | json | event="Batch LLM cost summary"
+# ─────────────────────────────────────────────────────────────────────────────

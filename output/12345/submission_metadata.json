@@ -1,6 +1,6 @@
 {
-  "run_id": "6813740a7dcf2f8d",
-  "batch_id": "batch-test-2",
+  "run_id": "db94005df703e994",
+  "batch_id": "phase1-test",
   "claim_id": "12345",
   "patient_id": "SHP-MBR-001",
   "payer_id": "SHP-001",
@@ -14,13 +14,13 @@
   "recommended_action": "appeal",
   "denial_category": "prior_auth",
   "confidence_score": 0.95,
-  "root_cause": "The service was denied because it is not covered under the patient's current benefit plan without prior authorization.",
+  "root_cause": "Service performed without required authorization. Request retro-auth and appeal.",
   "errors": [
     "[intake_agent] [data] EOB PDF path 'docs/EOB.pdf' does not exist \u2014 OCR will use mock data"
   ],
-  "processing_started_at": "2026-04-13T19:40:17.562766",
-  "packaged_at": "2026-04-13T19:40:32.396547",
-  "appeal_deadline": "2026-02-28",
-  "days_until_appeal_deadline": -44,
+  "processing_started_at": "2026-04-14T14:58:15.325946",
+  "packaged_at": "2026-04-14T14:58:37.415101",
+  "appeal_deadline": "2026-03-17",
+  "days_until_appeal_deadline": -28,
   "is_urgent": true
 }

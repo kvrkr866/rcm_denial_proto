@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import time
@@ -24,6 +25,7 @@ from typing import Literal
 from rcm_denial.models.output import BatchReport, ClaimResult
 from rcm_denial.services.audit_service import get_logger
 from rcm_denial.services.claim_intake import get_intake_report, stream_claims
+from rcm_denial.services.data_source_adapters import close_ehr_session, initialize_ehr_session
 from rcm_denial.workflows.denial_graph import process_claim
 
 logger = get_logger(__name__)
@@ -32,6 +34,75 @@ logger = get_logger(__name__)
 # ------------------------------------------------------------------ #
 # Idempotency check
 # ------------------------------------------------------------------ #
+
+def _extract_payer_ids_from_csv(csv_path: Path, source: str) -> list[str]:
+    """
+    Peeks at the CSV to collect unique payer IDs before the main loop.
+    Returns a list of raw payer_id values found in the file.
+    Non-fatal: returns [] on any read error.
+    """
+    from rcm_denial.services.claim_intake import FIELD_MAPS
+
+    field_map = FIELD_MAPS.get(source, {})
+    # The payer column could be mapped to 'payer_id' or 'payer_name' in various sources
+    payer_cols = set()
+    for csv_col, internal in field_map.items():
+        if internal in ("payer_id", "payer_name"):
+            payer_cols.add(csv_col)
+    # Also check direct column names used by sources without a mapping
+    payer_cols.update({"payer_id", "payer_name", "payer"})
+
+    ids: set[str] = set()
+    try:
+        with open(csv_path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                for col in payer_cols:
+                    val = row.get(col, "").strip()
+                    if val:
+                        ids.add(val)
+                        break
+    except Exception as exc:
+        logger.warning("Could not peek payer IDs from CSV", error=str(exc))
+
+    return list(ids)
+
+
+def _run_sop_preflight(payer_ids: list[str], batch_id: str) -> None:
+    """
+    Checks the SOP manifest for every payer in the batch.
+    Logs a warning per missing/degraded payer — never blocks the batch.
+    """
+    if not payer_ids:
+        return
+    try:
+        from rcm_denial.services.sop_ingestion import check_payer_coverage
+        report = check_payer_coverage(payer_ids)
+        logger.info(
+            "SOP coverage pre-flight",
+            batch_id=batch_id,
+            coverage_pct=report["coverage_pct"],
+            covered=report["covered"],
+            missing=report["missing"],
+            degraded=report["degraded"],
+        )
+        for payer_key in report["missing"]:
+            logger.warning(
+                "SOP collection missing for payer — keyword fallback will be used. "
+                "Run 'rcm-denial init' to build the collection.",
+                payer_key=payer_key,
+                batch_id=batch_id,
+            )
+        for payer_key in report["degraded"]:
+            logger.warning(
+                "SOP collection degraded for payer — check manifest status. "
+                "Run 'rcm-denial init' to rebuild.",
+                payer_key=payer_key,
+                batch_id=batch_id,
+            )
+    except Exception as exc:
+        logger.warning("SOP pre-flight check failed — non-fatal", error=str(exc))
+
 
 def _is_already_processed(claim_id: str, output_dir: Path) -> bool:
     """
@@ -114,6 +185,32 @@ def process_batch(
     batch_start = time.perf_counter()
 
     # ---------------------------------------------------------------- #
+    # SOP pre-flight — check payer coverage before any claims run.
+    # Peek payer IDs from the CSV, check manifest, warn on missing.
+    # Sets pipeline mode so RAG never triggers indexing mid-claim.
+    # ---------------------------------------------------------------- #
+    from rcm_denial.tools.sop_rag_tool import set_pipeline_mode
+
+    payer_ids = _extract_payer_ids_from_csv(csv_path, source)
+    _run_sop_preflight(payer_ids, batch_id)
+    set_pipeline_mode(True)
+
+    # ---------------------------------------------------------------- #
+    # Gap 36 — Open a single EHR session for the entire batch.
+    # For RPA adapters this launches the browser and logs in once.
+    # For mock/REST adapters this is lightweight (just caches the instance).
+    # ---------------------------------------------------------------- #
+    try:
+        initialize_ehr_session(batch_id, adapter_type=settings.emr_adapter)
+        logger.info("EHR session opened for batch", batch_id=batch_id)
+    except Exception as exc:
+        logger.warning(
+            "EHR session initialization failed — proceeding with per-claim adapters",
+            batch_id=batch_id,
+            error=str(exc),
+        )
+
+    # ---------------------------------------------------------------- #
     # Main loop — stream_claims yields valid ClaimRecords, urgent first
     # ---------------------------------------------------------------- #
 
@@ -192,6 +289,17 @@ def process_batch(
             )
 
     # ---------------------------------------------------------------- #
+    # Gap 36 — Close EHR session (releases browser for RPA adapters)
+    # ---------------------------------------------------------------- #
+    try:
+        close_ehr_session(batch_id)
+    except Exception as exc:
+        logger.warning("EHR session close error", batch_id=batch_id, error=str(exc))
+
+    # Restore normal mode — allow lazy build outside of batch context
+    set_pipeline_mode(False)
+
+    # ---------------------------------------------------------------- #
     # Finalize report — pull intake stats from DB
     # ---------------------------------------------------------------- #
 
@@ -206,6 +314,34 @@ def process_batch(
     summary_path = settings.output_dir / f"batch_summary_{batch_id}.json"
     with open(summary_path, "w") as f:
         json.dump(report.model_dump(), f, indent=2, default=str)
+
+    # ---------------------------------------------------------------- #
+    # Gap 44/49 — Export Prometheus metrics and log LLM cost summary
+    # ---------------------------------------------------------------- #
+    if settings.metrics_export_after_batch:
+        try:
+            from rcm_denial.services.metrics_service import collect_and_export, push_to_gateway
+            prom_path = collect_and_export(batch_id=batch_id)
+            logger.info("Metrics exported", path=str(prom_path), batch_id=batch_id)
+
+            if settings.prometheus_pushgateway_url:
+                push_to_gateway(settings.prometheus_pushgateway_url, batch_id=batch_id)
+        except Exception as exc:
+            logger.warning("Metrics export failed — non-fatal", error=str(exc))
+
+    try:
+        from rcm_denial.services.cost_tracker import get_batch_cost_summary
+        cost = get_batch_cost_summary(batch_id=batch_id)
+        logger.info(
+            "Batch LLM cost summary",
+            batch_id=batch_id,
+            total_cost_usd=cost["total_cost_usd"],
+            total_calls=cost["total_calls"],
+            claims_tracked=cost["claims_tracked"],
+            avg_cost_per_claim=cost["avg_cost_per_claim"],
+        )
+    except Exception as exc:
+        logger.warning("Cost summary failed — non-fatal", error=str(exc))
 
     logger.info(
         "Batch processing complete",

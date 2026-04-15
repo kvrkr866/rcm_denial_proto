@@ -19,7 +19,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .analysis import CorrectionPlan, DenialAnalysis
+from .analysis import CorrectionPlan, DenialAnalysis, EvidenceCheckResult
 from .appeal import AppealPackage
 from .claim import ClaimRecord, EnrichedData
 
@@ -81,9 +81,20 @@ class DenialWorkflowState(BaseModel):
     # ---- Agent outputs (populated as graph progresses) ----
     enriched_data: Optional[EnrichedData] = None
     denial_analysis: Optional[DenialAnalysis] = None
+    evidence_check: Optional[EvidenceCheckResult] = None   # LLM call 1 output
     correction_plan: Optional[CorrectionPlan] = None
     appeal_package: Optional[AppealPackage] = None
     output_package: Optional[SubmissionPackage] = None
+
+    # ---- Human-in-the-loop (Phase 4) ----
+    human_feedback: Optional[str] = None
+    human_review_status: Literal["pending", "approved", "re_routed", "human_override", "written_off", "submitted", ""] = ""
+    # Reviewer guidance injected into re-run LLM prompts
+    human_notes: str = ""
+    # True when response package was written by a human (not LLM)
+    is_human_override: bool = False
+    # How many HITL review cycles this claim has gone through
+    review_count: int = 0
 
     # ---- Control flow ----
     routing_decision: Literal["resubmit", "appeal", "both", "write_off", ""] = ""

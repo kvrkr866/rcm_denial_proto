@@ -1,6 +1,6 @@
 {
-  "run_id": "473f41b7e28f1a30",
-  "batch_id": "errcheck2",
+  "run_id": "a430ebc11dd9b1e8",
+  "batch_id": "phase1-test",
   "claim_id": "22003",
   "patient_id": "CRH-MBR-003",
   "payer_id": "CRH-001",
@@ -10,17 +10,17 @@
   "billed_amount": 7500.0,
   "carc_code": "16",
   "rarc_code": null,
-  "package_type": "appeal",
-  "recommended_action": "appeal",
-  "denial_category": "prior_auth",
-  "confidence_score": 0.9,
-  "root_cause": "The claim was denied because the service is not covered under the patient's current benefit plan without prior authorization.",
+  "package_type": "resubmission",
+  "recommended_action": "resubmit",
+  "denial_category": "coding_error",
+  "confidence_score": 0.95,
+  "root_cause": "Claim missing required information. Identify missing field from RARC code and resubmit.",
   "errors": [
     "[intake_agent] [data] EOB PDF path 'docs/EOB_22003.pdf' does not exist \u2014 OCR will use mock data"
   ],
-  "processing_started_at": "2026-04-13T19:43:05.910171",
-  "packaged_at": "2026-04-13T19:44:03.371795",
-  "appeal_deadline": "2026-03-27",
-  "days_until_appeal_deadline": -17,
-  "is_urgent": true
+  "processing_started_at": "2026-04-14T14:56:54.567156",
+  "packaged_at": "2026-04-14T14:58:15.097574",
+  "appeal_deadline": null,
+  "days_until_appeal_deadline": null,
+  "is_urgent": false
 }

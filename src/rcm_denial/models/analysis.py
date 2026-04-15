@@ -19,6 +19,45 @@ from pydantic import BaseModel, Field
 
 
 # ------------------------------------------------------------------ #
+# Evidence check result (LLM call 1 output)
+# ------------------------------------------------------------------ #
+
+class EvidenceCheckResult(BaseModel):
+    """
+    Output of evidence_check_agent (LLM call 1).
+
+    Answers: does the available evidence address this denial?
+    Provides the key arguments and any gaps before response generation.
+    """
+    claim_id: str
+    evidence_sufficient: bool = Field(
+        ..., description="True if available evidence is enough to support the response"
+    )
+    evidence_gaps: list[str] = Field(
+        default_factory=list,
+        description="Specific evidence items still missing",
+    )
+    key_arguments: list[str] = Field(
+        default_factory=list,
+        description="Key arguments to make in the response, derived from available evidence",
+    )
+    needs_additional_ehr_fetch: bool = Field(
+        default=False,
+        description="True if a targeted EHR fetch should be triggered (optional 3rd LLM call path)",
+    )
+    additional_fetch_description: str = Field(
+        default="",
+        description="What specific record/report needs to be fetched from EHR",
+    )
+    recommended_action_confirmed: Literal["resubmit", "appeal", "both", "write_off"] = Field(
+        ..., description="Confirms or revises the action from analysis_agent",
+    )
+    confidence_score: float = Field(..., ge=0.0, le=1.0)
+    reasoning: str = Field(default="", description="LLM reasoning for evidence assessment")
+    checked_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ------------------------------------------------------------------ #
 # Denial analysis (output of analysis agent, LLM structured output)
 # ------------------------------------------------------------------ #
 

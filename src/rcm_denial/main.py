@@ -2135,7 +2135,7 @@ def evals_quality_signals_cmd():
 
 @cli.command("web")
 @click.option("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
-@click.option("--port", default=8080, type=int, help="Port (default: 8080)")
+@click.option("--port", default=8888, type=int, help="Port (default: 8888)")
 @click.option("--reload", is_flag=True, default=False, help="Auto-reload on code changes (dev)")
 def web_cmd(host: str, port: int, reload: bool):
     """

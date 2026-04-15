@@ -16,7 +16,7 @@ from pathlib import Path
 
 from nicegui import ui
 
-from rcm_denial.web.app import create_header, create_footer
+from rcm_denial.web.layout import create_header, create_footer
 
 
 @ui.page("/claim/{run_id}")

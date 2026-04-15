@@ -14,7 +14,7 @@ from pathlib import Path
 
 from nicegui import ui
 
-from rcm_denial.web.app import create_header, create_footer
+from rcm_denial.web.layout import create_header, create_footer
 
 
 GOLDEN_CASES_PATH = Path("data/evals/golden_cases.json")

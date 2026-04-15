@@ -28,7 +28,7 @@ from typing import Optional
 
 from nicegui import ui, events
 
-from rcm_denial.web.app import create_header, create_footer
+from rcm_denial.web.layout import create_header, create_footer
 
 
 # Pipeline stages in order
@@ -54,10 +54,12 @@ class BatchState:
     """Tracks batch processing state for the three-panel UI."""
     def __init__(self):
         self.pending: list[dict] = []       # claims waiting to process
+        self.selected: set[str] = set()     # claim_ids selected via checkbox
         self.current: dict | None = None    # claim currently being processed
         self.current_stage: str = ""        # current pipeline node name
         self.completed: list[dict] = []     # finished claims with results
         self.is_running: bool = False
+        self.cancel_requested: bool = False # stop after current claim
         self.batch_id: str = ""
 
 
@@ -69,114 +71,221 @@ def process_page():
     create_header()
 
     state = BatchState()
+    file_state = {"name": None}  # track uploaded filename
 
-    with ui.column().classes("w-full max-w-7xl mx-auto p-4 gap-4"):
-        ui.label("Process Claims").classes("text-3xl font-bold text-gray-800")
+    with ui.column().classes("w-full max-w-7xl mx-auto px-4 py-1 gap-1") \
+            .style("height: calc(100vh - 80px)"):
 
-        # ── Three-panel layout ────────────────────────────────
-        with ui.row().classes("w-full gap-4 items-stretch") \
-                .style("min-height: 500px"):
+        # ── Action bar: Upload + Process + Init SOPs (single compact row) ──
+        with ui.card().classes("w-full py-1 px-3 flex-shrink-0"):
+            with ui.row().classes("w-full gap-3 items-center"):
+                # CSV upload as a compact button with tick/status
+                upload_icon = ui.icon("cloud_upload").classes("text-gray-400 text-lg")
+                upload_label = ui.button(
+                    "Upload CSV", icon="attach_file",
+                    on_click=lambda: upload_hidden.run_method("pickFiles"),
+                ).props("flat dense no-caps color=primary size=sm")
 
-            # LEFT: Pending queue
-            with ui.card().classes("w-1/4 flex-shrink-0"):
-                ui.label("Pending").classes("text-lg font-semibold text-orange-700")
-                pending_count = ui.label("0 claims").classes("text-xs text-gray-400")
-                ui.separator()
-                pending_container = ui.column().classes("w-full gap-1 overflow-auto") \
-                    .style("max-height: 420px")
+                # Hidden actual upload widget
+                upload_hidden = ui.upload(
+                    on_upload=lambda e: _handle_upload_v2(
+                        e, state, pending_container, pending_count,
+                        batch_id_input, upload_icon, upload_label, file_state,
+                    ),
+                    auto_upload=True,
+                ).classes("hidden").props('accept=".csv"')
 
-            # CENTER: Currently processing
-            with ui.card().classes("flex-1"):
-                ui.label("Processing").classes("text-lg font-semibold text-blue-700")
-                center_container = ui.column().classes("w-full gap-3")
+                ui.separator().props("vertical").classes("h-6")
 
-            # RIGHT: Completed
-            with ui.card().classes("w-1/3 flex-shrink-0"):
-                ui.label("Completed").classes("text-lg font-semibold text-green-700")
-                completed_count = ui.label("0 claims").classes("text-xs text-gray-400")
-                ui.separator()
-                completed_container = ui.column().classes("w-full gap-1 overflow-auto") \
-                    .style("max-height: 420px")
-
-        # ── Bottom: Upload / Add claim ────────────────────────
-        with ui.card().classes("w-full"):
-            with ui.row().classes("w-full gap-6 items-end"):
-                # CSV upload
-                with ui.column().classes("gap-2"):
-                    ui.label("Upload CSV").classes("text-sm font-semibold")
-                    upload_widget = ui.upload(
-                        label="Drop CSV or click",
-                        on_upload=lambda e: _handle_upload(e, state, pending_container,
-                                                            pending_count, batch_id_input),
-                        auto_upload=True,
-                    ).classes("w-64").props('accept=".csv" flat dense')
-
-                batch_id_input = ui.input("Batch ID", placeholder="Auto-generated") \
-                    .classes("w-48")
+                # Process mode toggle
+                process_mode = ui.toggle(
+                    {False: "All Claims", True: "Selected Only"},
+                    value=False,
+                ).props("dense size=sm no-caps")
 
                 process_btn = ui.button(
-                    "Process All", icon="play_arrow",
+                    "Process", icon="play_arrow",
                     on_click=lambda: _run_batch(
                         state, pending_container, pending_count,
                         center_container, completed_container, completed_count,
-                        batch_id_input, process_btn,
+                        batch_id_input, process_btn, cancel_btn,
+                        selected_only=process_mode.value,
                     ),
-                ).props("color=primary")
+                ).props("color=primary dense no-caps")
 
-                # SOP init button
-                init_btn = ui.button("Init SOPs", icon="build",
-                                     on_click=lambda: _run_sop_init(center_container))
-                init_btn.props("flat color=grey size=sm")
+                cancel_btn = ui.button(
+                    "Stop", icon="stop",
+                    on_click=lambda: _request_cancel(state, cancel_btn),
+                ).props("color=red dense outline no-caps")
+                cancel_btn.set_visibility(False)
+
+                batch_id_input = ui.input(placeholder="Batch ID") \
+                    .classes("w-40").props("dense outlined")
+                batch_id_input.value = f"B-{datetime.now().strftime('%y%m%d-%H%M')}-001"
+
+                # Push Init SOPs to the right
+                ui.space()
+                ui.button("Init SOPs", icon="build",
+                          on_click=lambda: _run_sop_init(center_container)) \
+                    .props("flat color=grey dense size=sm no-caps") \
+                    .tooltip("Build/refresh SOP RAG collections")
+
+        # ── Page heading (outside the panels, between action bar and panels) ──
+        ui.label("Process Claims").classes("text-lg font-bold text-gray-800 flex-shrink-0 mt-1")
+
+        # ── THREE-PANEL layout (fills remaining viewport) ─────
+        with ui.row().classes("w-full gap-2 flex-1 min-h-0"):
+
+            # LEFT: Pending queue
+            with ui.card().classes("w-1/5 flex-shrink-0 flex flex-col p-2"):
+                with ui.row().classes("items-center justify-between"):
+                    ui.label("Pending").classes("text-xs font-semibold text-orange-700")
+                    pending_count = ui.label("0").classes("text-[10px] text-gray-400")
+                pending_container = ui.column() \
+                    .classes("w-full gap-1 overflow-auto flex-1")
+
+            # CENTER: Processing
+            with ui.card().classes("flex-1 flex flex-col p-2"):
+                ui.label("Processing").classes("text-xs font-semibold text-blue-700")
+                center_container = ui.column() \
+                    .classes("w-full gap-1 overflow-auto flex-1")
+
+            # RIGHT: Completed
+            with ui.card().classes("w-1/4 flex-shrink-0 flex flex-col p-2"):
+                with ui.row().classes("items-center justify-between"):
+                    ui.label("Completed").classes("text-xs font-semibold text-green-700")
+                    completed_count = ui.label("0").classes("text-[10px] text-gray-400")
+                completed_container = ui.column() \
+                    .classes("w-full gap-1 overflow-auto flex-1")
 
     create_footer()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Cancel handler
+# ──────────────────────────────────────────────────────────────────────
+
+def _request_cancel(state: BatchState, cancel_btn):
+    state.cancel_requested = True
+    cancel_btn.props("disable")
+    cancel_btn.text = "Cancelling..."
+    ui.notify("Cancel requested — will stop after current claim finishes", type="warning")
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Upload handler
 # ──────────────────────────────────────────────────────────────────────
 
-async def _handle_upload(
+async def _handle_upload_v2(
     e: events.UploadEventArguments,
     state: BatchState,
-    pending_container,
-    pending_count,
+    pending_container, pending_count,
     batch_id_input,
+    upload_icon, upload_label, file_state,
 ):
+    """Handle CSV upload: update icon to tick, show filename on hover."""
     content = e.content.read().decode("utf-8")
     reader = csv.DictReader(io.StringIO(content))
     rows = list(reader)
 
-    # Save to temp file for batch_processor
+    # Save to temp file
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
     tmp.write(content)
     tmp.close()
     state._csv_path = tmp.name
 
+    # Update upload button: show tick + filename on hover
+    filename = getattr(e, "name", "uploaded.csv") or "uploaded.csv"
+    file_state["name"] = filename
+    upload_icon._props["name"] = "check_circle"
+    upload_icon.classes(replace="text-green-600 text-lg")
+    upload_icon.update()
+    upload_label.text = f"{len(rows)} claims"
+    upload_label.tooltip(f"File: {filename}")
+    upload_label.update()
+
     # Populate pending list
     state.pending = rows
+    state.selected = set()
     state.completed = []
 
-    pending_container.clear()
-    with pending_container:
-        for row in rows:
-            _pending_claim_chip(row)
+    # Auto-generate fresh batch ID
+    batch_id_input.value = f"B-{datetime.now().strftime('%y%m%d-%H%M%S')}-001"
 
-    pending_count.set_text(f"{len(rows)} claims")
+    _rebuild_pending_panel(state, pending_container, pending_count)
+    ui.notify(f"Loaded {len(rows)} claims from {filename}", type="positive")
+
+
+async def _handle_upload(
+    e: events.UploadEventArguments,
+    state: BatchState,
+    pending_container, pending_count, batch_id_input,
+):
+    """Legacy fallback upload handler."""
+    content = e.content.read().decode("utf-8")
+    reader = csv.DictReader(io.StringIO(content))
+    rows = list(reader)
+
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    tmp.write(content)
+    tmp.close()
+    state._csv_path = tmp.name
+
+    state.pending = rows
+    state.selected = set()
+    state.completed = []
+
+    _rebuild_pending_panel(state, pending_container, pending_count)
     ui.notify(f"Loaded {len(rows)} claims", type="positive")
 
 
-def _pending_claim_chip(row: dict) -> None:
+def _rebuild_pending_panel(state: BatchState, pending_container, pending_count) -> None:
+    pending_container.clear()
+    with pending_container:
+        # Select all / none
+        with ui.row().classes("gap-2 mb-1"):
+            ui.button("All", on_click=lambda: _select_all(state, pending_container, pending_count)) \
+                .props("flat dense size=xs color=primary").tooltip("Select all")
+            ui.button("None", on_click=lambda: _select_none(state, pending_container, pending_count)) \
+                .props("flat dense size=xs").tooltip("Deselect all")
+
+        for row in state.pending:
+            _pending_claim_chip(row, state)
+
+    count = len(state.pending)
+    sel = len(state.selected)
+    pending_count.set_text(f"{count} claims" + (f" ({sel} selected)" if sel > 0 else ""))
+
+
+def _select_all(state, pending_container, pending_count):
+    state.selected = {r.get("claim_id", "") for r in state.pending}
+    _rebuild_pending_panel(state, pending_container, pending_count)
+
+
+def _select_none(state, pending_container, pending_count):
+    state.selected = set()
+    _rebuild_pending_panel(state, pending_container, pending_count)
+
+
+def _pending_claim_chip(row: dict, state: BatchState) -> None:
     claim_id = row.get("claim_id", "?")
     payer = row.get("payer_id", "?")
     amount = row.get("billed_amount", "0")
     carc = row.get("carc_code", "?")
+    is_selected = claim_id in state.selected
 
-    with ui.card().classes("w-full px-3 py-2 bg-orange-50 cursor-default"):
-        with ui.row().classes("items-center justify-between"):
-            with ui.column().classes("gap-0"):
+    with ui.card().classes(
+        f"w-full px-3 py-1 cursor-pointer "
+        f"{'bg-blue-50 border border-blue-300' if is_selected else 'bg-orange-50'}"
+    ):
+        with ui.row().classes("items-center gap-2"):
+            cb = ui.checkbox(value=is_selected, on_change=lambda e, cid=claim_id: (
+                state.selected.add(cid) if e.value else state.selected.discard(cid)
+            )).props("dense size=xs")
+            with ui.column().classes("gap-0 flex-1"):
                 ui.label(claim_id).classes("text-sm font-semibold")
-                ui.label(f"{payer} | CARC {carc}").classes("text-xs text-gray-500")
-            ui.label(f"${float(amount):,.0f}").classes("text-sm font-mono text-gray-600")
+                ui.label(f"{payer} | CARC {carc}").classes("text-[10px] text-gray-500")
+            ui.label(f"${float(amount):,.0f}").classes("text-xs font-mono text-gray-600")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -187,7 +296,8 @@ async def _run_batch(
     state: BatchState,
     pending_container, pending_count,
     center_container, completed_container, completed_count,
-    batch_id_input, process_btn,
+    batch_id_input, process_btn, cancel_btn,
+    selected_only: bool = False,
 ):
     if not state.pending:
         ui.notify("Upload a CSV first", type="warning")
@@ -197,9 +307,22 @@ async def _run_batch(
         ui.notify("Batch already running", type="warning")
         return
 
+    if selected_only and not state.selected:
+        ui.notify("Select at least one claim first (use checkboxes)", type="warning")
+        return
+
     state.is_running = True
+    state.cancel_requested = False
     process_btn.props("disable loading")
-    state.batch_id = batch_id_input.value or f"WEB-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    cancel_btn.set_visibility(True)
+    cancel_btn.props(remove="disable")
+    cancel_btn.text = "Cancel"
+    # Auto-generate unique batch ID: date + time + sequence
+    if batch_id_input.value and not batch_id_input.value.startswith("B-"):
+        state.batch_id = batch_id_input.value
+    else:
+        state.batch_id = f"B-{datetime.now().strftime('%y%m%d-%H%M%S')}-{len(state.completed) + 1:03d}"
+    batch_id_input.value = state.batch_id
 
     try:
         from rcm_denial.services.claim_intake import stream_claims
@@ -208,8 +331,18 @@ async def _run_batch(
             ui.notify("No CSV file loaded", type="warning")
             return
 
-        claims = list(stream_claims(csv_path, source_label="web_ui", batch_id=state.batch_id))
+        all_claims = list(stream_claims(csv_path, source="passthrough", batch_id=state.batch_id))
+
+        # Filter to selected claims only if requested
+        if selected_only:
+            claims = [c for c in all_claims if c.claim_id in state.selected]
+        else:
+            claims = all_claims
         total = len(claims)
+
+        if total == 0:
+            ui.notify("No claims to process", type="warning")
+            return
 
         for idx, claim in enumerate(claims):
             claim_id = claim.claim_id
@@ -330,15 +463,16 @@ async def _run_batch(
                     "error": error,
                 }
             elif result:
-                pkg = result.output_package
+                # process_claim returns SubmissionPackage directly
+                pkg = result
                 completed_info = {
                     **claim_info,
-                    "status": pkg.status if pkg else "unknown",
-                    "package_type": pkg.package_type if pkg else "unknown",
-                    "run_id": result.run_id,
+                    "status": getattr(pkg, "status", "unknown"),
+                    "package_type": getattr(pkg, "package_type", "unknown"),
+                    "run_id": getattr(pkg, "run_id", ""),
                     "duration_s": round(elapsed, 1),
-                    "output_dir": pkg.output_dir if pkg else "",
-                    "routing": result.routing_decision,
+                    "output_dir": getattr(pkg, "output_dir", ""),
+                    "routing": getattr(pkg, "package_type", ""),
                 }
             else:
                 completed_info = {
@@ -357,19 +491,39 @@ async def _run_batch(
                     _completed_claim_card(c)
             completed_count.set_text(f"{len(state.completed)} claims")
 
-        # All done
-        center_container.clear()
-        with center_container:
-            ui.icon("check_circle").classes("text-5xl text-green-600")
-            ui.label(f"Batch {state.batch_id} complete!").classes("text-xl font-bold text-green-700")
-            ui.label(f"{len(state.completed)} claims processed").classes("text-gray-500")
-            with ui.row().classes("gap-4 mt-4"):
-                ui.button("View Stats", icon="bar_chart",
-                          on_click=lambda: ui.navigate.to("/stats")).props("color=primary")
-                ui.button("Review Queue", icon="rate_review",
-                          on_click=lambda: ui.navigate.to("/review")).props("flat")
+            # Check cancel before processing next claim
+            if state.cancel_requested:
+                remaining_count = total - idx - 1
+                center_container.clear()
+                with center_container:
+                    ui.icon("cancel").classes("text-5xl text-orange-500")
+                    ui.label("Processing cancelled").classes("text-xl font-bold text-orange-700")
+                    ui.label(
+                        f"{len(state.completed)} claims processed, "
+                        f"{remaining_count} skipped"
+                    ).classes("text-gray-500")
+                    with ui.row().classes("gap-4 mt-4"):
+                        ui.button("View Stats", icon="bar_chart",
+                                  on_click=lambda: ui.navigate.to("/stats")).props("color=primary")
+                        ui.button("Review Queue", icon="rate_review",
+                                  on_click=lambda: ui.navigate.to("/review")).props("flat")
+                ui.notify(f"Cancelled: {len(state.completed)} processed, {remaining_count} skipped", type="warning")
+                break
 
-        ui.notify(f"Batch complete: {len(state.completed)} claims", type="positive")
+        else:
+            # Loop completed without break (no cancel)
+            center_container.clear()
+            with center_container:
+                ui.icon("check_circle").classes("text-5xl text-green-600")
+                ui.label(f"Batch {state.batch_id} complete!").classes("text-xl font-bold text-green-700")
+                ui.label(f"{len(state.completed)} claims processed").classes("text-gray-500")
+                with ui.row().classes("gap-4 mt-4"):
+                    ui.button("View Stats", icon="bar_chart",
+                              on_click=lambda: ui.navigate.to("/stats")).props("color=primary")
+                    ui.button("Review Queue", icon="rate_review",
+                              on_click=lambda: ui.navigate.to("/review")).props("flat")
+
+            ui.notify(f"Batch complete: {len(state.completed)} claims", type="positive")
 
     except Exception as exc:
         center_container.clear()
@@ -380,8 +534,10 @@ async def _run_batch(
 
     finally:
         state.is_running = False
+        state.cancel_requested = False
         state.current = None
         process_btn.props(remove="disable loading")
+        cancel_btn.set_visibility(False)
 
 
 # ──────────────────────────────────────────────────────────────────────

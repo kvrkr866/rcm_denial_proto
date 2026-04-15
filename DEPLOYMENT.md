@@ -1,5 +1,66 @@
 # Deployment Guide — RCM Denial Management
 
+## Prerequisites — Install Checklist
+
+### System Packages
+
+| Package | Required? | Install (Linux) | Install (macOS) | Purpose |
+|---------|-----------|-----------------|-----------------|---------|
+| **Python 3.11+** | Required | `sudo apt install python3.11 python3.11-venv python3-pip` | `brew install python@3.11` | Runtime |
+| **tesseract-ocr** | Optional | `sudo apt install tesseract-ocr` | `brew install tesseract` | Scanned PDF OCR fallback (PyMuPDF handles digital PDFs without this) |
+| **poppler-utils** | Optional | `sudo apt install poppler-utils` | `brew install poppler` | PDF-to-image conversion (only needed if tesseract is used) |
+| **Docker** | Optional | [docs.docker.com/engine/install](https://docs.docker.com/engine/install/) | `brew install docker` | Container deployment |
+
+**Note:** `tesseract-ocr` and `poppler-utils` are only needed if you have **scanned** (image-only) EOB PDFs. Most EOBs are digital PDFs — PyMuPDF handles those without any system packages.
+
+### Python Packages
+
+All Python dependencies are listed in `requirements.txt` and `pyproject.toml`. Install with ONE of:
+
+```bash
+# Option A: requirements.txt (explicit)
+pip install -r requirements.txt
+
+# Option B: pyproject.toml editable install (recommended for development)
+pip install -e "."            # core + web UI
+pip install -e ".[dev]"       # + pytest, ruff, mypy
+pip install -e ".[all]"       # everything
+```
+
+Key packages installed:
+
+| Category | Packages |
+|----------|----------|
+| **AI Pipeline** | langgraph, langchain, langchain-openai, langchain-community, langchain-chroma, chromadb, openai |
+| **Data Models** | pydantic, pydantic-settings, python-dotenv |
+| **PDF & OCR** | PyMuPDF (primary OCR), pytesseract (fallback), pdf2image, pypdf, reportlab, fpdf2, Pillow |
+| **Web UI** | nicegui |
+| **CLI** | click, rich, structlog |
+| **Networking** | httpx, tenacity |
+| **Data** | pandas |
+| **Dev/Test** | pytest, pytest-asyncio, pytest-cov, ruff, mypy |
+
+### Verify Installation
+
+```bash
+# Check all critical imports
+python -c "
+import langgraph; print(f'langgraph {langgraph.__version__}')
+import langchain; print(f'langchain OK')
+import chromadb; print(f'chromadb {chromadb.__version__}')
+import pydantic; print(f'pydantic {pydantic.__version__}')
+import fitz; print(f'PyMuPDF {fitz.__doc__}')
+import nicegui; print(f'nicegui {nicegui.__version__}')
+import click; print(f'click {click.__version__}')
+print('All OK')
+"
+
+# Check CLI is registered
+rcm-denial --help
+```
+
+---
+
 ## Option 1: Local + ngrok (quickest, 5 min)
 
 Share your local machine with a public URL. Best for quick demos to 1-5 people.

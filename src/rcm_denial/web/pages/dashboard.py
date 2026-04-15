@@ -3,7 +3,7 @@
 # Project: RCM - Denial Management
 # Author:  RK (kvrkr866@gmail.com)
 # File name: web/pages/dashboard.py
-# Purpose: Landing page — overview cards with key metrics.
+# Purpose: Landing page -- overview cards with key metrics.
 #
 ##########################################################
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
-from rcm_denial.web.app import create_header, create_footer
+from rcm_denial.web.layout import create_header, create_footer
 
 
 @ui.page("/")
@@ -22,21 +22,21 @@ def dashboard_page():
     create_header()
 
     with ui.column().classes("w-full max-w-6xl mx-auto p-6 gap-6"):
-        ui.label("Dashboard").classes("text-3xl font-bold text-gray-800")
-        ui.label("Pipeline overview and key metrics").classes("text-gray-500")
+        ui.label("Dashboard").classes("text-2xl font-bold text-gray-800")
+        ui.label("Pipeline overview and key metrics").classes("text-sm text-gray-500 -mt-4")
 
-        # ── Metric cards ──────────────────────────────────────────
-        with ui.row().classes("w-full gap-4 flex-wrap"):
-            _metric_card("Pipeline",      "Process denied claims through the AI pipeline",  "play_circle",  "/process",  "blue")
-            _metric_card("Review Queue",  "Approve, re-route, or write off claims",         "rate_review",  "/review",   "orange")
-            _metric_card("Statistics",    "Pipeline scorecard, LLM cost, write-off impact", "bar_chart",    "/stats",    "green")
-            _metric_card("Evaluations",   "Golden dataset regression, quality signals",     "science",      "/evals",    "purple")
+        # ── Navigation cards (uniform size) ──────────────────────
+        with ui.grid(columns=4).classes("w-full gap-4"):
+            _metric_card("Pipeline",     "Process denied claims",         "play_circle", "/process", "blue")
+            _metric_card("Review Queue", "Approve, re-route, write off",  "rate_review", "/review",  "orange")
+            _metric_card("Statistics",   "Scorecard, LLM cost, impact",   "bar_chart",   "/stats",   "green")
+            _metric_card("Evaluations",  "Golden dataset, quality signals","science",     "/evals",   "purple")
 
         # ── Live stats summary ────────────────────────────────────
         ui.separator()
-        ui.label("Quick Stats").classes("text-xl font-semibold text-gray-700")
+        ui.label("Quick Stats").classes("text-lg font-semibold text-gray-700")
 
-        stats_container = ui.column().classes("w-full gap-2")
+        stats_container = ui.column().classes("w-full")
 
         async def load_stats():
             try:
@@ -51,7 +51,7 @@ def dashboard_page():
 
                 with stats_container:
                     stats_container.clear()
-                    with ui.row().classes("gap-6 flex-wrap"):
+                    with ui.grid(columns=6).classes("w-full gap-3"):
                         _stat_chip("Total Claims", str(total), "blue")
                         _stat_chip("Approved", str(approved), "green")
                         _stat_chip("Pending Review", str(pending), "orange")
@@ -59,12 +59,17 @@ def dashboard_page():
                         if fp_rate is not None:
                             color = "green" if fp_rate >= 70 else ("orange" if fp_rate >= 50 else "red")
                             _stat_chip("First-Pass Approval", f"{fp_rate:.1f}%", color)
+                        else:
+                            _stat_chip("First-Pass Approval", "--", "gray")
                         if wo_amount > 0:
                             _stat_chip("Write-Off Impact", f"${wo_amount:,.2f}", "red")
-            except Exception as exc:
+                        else:
+                            _stat_chip("Write-Off Impact", "$0", "green")
+            except Exception:
                 with stats_container:
                     stats_container.clear()
-                    ui.label(f"No data yet — process a batch first.").classes("text-gray-400 italic")
+                    ui.label("No data yet -- process a batch first.") \
+                        .classes("text-gray-400 italic")
 
         ui.timer(0.1, load_stats, once=True)
 
@@ -72,16 +77,21 @@ def dashboard_page():
 
 
 def _metric_card(title: str, description: str, icon: str, href: str, color: str) -> None:
-    with ui.card().classes("cursor-pointer hover:shadow-lg transition-shadow w-64") \
-            .on("click", lambda: ui.navigate.to(href)):
-        with ui.row().classes("items-center gap-3"):
+    """Uniform-sized navigation card."""
+    with ui.card().classes(
+        "cursor-pointer hover:shadow-lg transition-shadow h-24 "
+        "flex items-center justify-center"
+    ).on("click", lambda: ui.navigate.to(href)):
+        with ui.row().classes("items-center gap-3 px-4"):
             ui.icon(icon).classes(f"text-3xl text-{color}-600")
             with ui.column().classes("gap-0"):
-                ui.label(title).classes("text-lg font-semibold")
-                ui.label(description).classes("text-xs text-gray-500")
+                ui.label(title).classes("text-base font-semibold")
+                ui.label(description).classes("text-[11px] text-gray-500 leading-tight")
 
 
 def _stat_chip(label: str, value: str, color: str) -> None:
-    with ui.card().classes(f"px-4 py-2 bg-{color}-50"):
-        ui.label(value).classes(f"text-2xl font-bold text-{color}-700")
-        ui.label(label).classes("text-xs text-gray-500")
+    """Uniform-sized stat chip."""
+    with ui.card().classes(f"bg-{color}-50 h-20 flex items-center justify-center"):
+        with ui.column().classes("items-center gap-0"):
+            ui.label(value).classes(f"text-xl font-bold text-{color}-700")
+            ui.label(label).classes("text-[10px] text-gray-500 text-center")

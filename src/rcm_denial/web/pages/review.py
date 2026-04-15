@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
-from rcm_denial.web.app import create_header, create_footer
+from rcm_denial.web.layout import create_header, create_footer
 
 
 STATUS_COLORS = {

@@ -221,7 +221,8 @@ git clone <repo-url>
 cd rcm_denial_proto
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[all]"       # core + web UI + dev tools
+pip install -r requirements.txt    # all packages (core + web UI + dev tools)
+pip install -e .                   # install the project itself
 
 # 3. Configure
 cp .env.example .env

@@ -1,0 +1,45 @@
+{
+  "last_updated": "2026-04-15T13:29:40.941651",
+  "payers": {
+    "global": {
+      "payer_key": "global",
+      "collection_name": "sop_global",
+      "document_count": 8,
+      "indexed_at": "2026-04-15T13:29:17.871596",
+      "sop_dir_exists": true,
+      "status": "ok",
+      "verified_at": "2026-04-15T13:29:18.860289",
+      "verify_hit_count": 3
+    },
+    "crestviewhealth": {
+      "payer_key": "crestviewhealth",
+      "collection_name": "sop_crestviewhealth",
+      "document_count": 4,
+      "indexed_at": "2026-04-15T13:29:34.482943",
+      "sop_dir_exists": true,
+      "status": "ok",
+      "verified_at": "2026-04-15T13:29:35.554881",
+      "verify_hit_count": 3
+    },
+    "nationalcare": {
+      "payer_key": "nationalcare",
+      "collection_name": "sop_nationalcare",
+      "document_count": 4,
+      "indexed_at": "2026-04-15T13:29:37.345715",
+      "sop_dir_exists": true,
+      "status": "ok",
+      "verified_at": "2026-04-15T13:29:38.221333",
+      "verify_hit_count": 3
+    },
+    "summithealth": {
+      "payer_key": "summithealth",
+      "collection_name": "sop_summithealth",
+      "document_count": 4,
+      "indexed_at": "2026-04-15T13:29:40.088992",
+      "sop_dir_exists": true,
+      "status": "ok",
+      "verified_at": "2026-04-15T13:29:40.929677",
+      "verify_hit_count": 3
+    }
+  }
+}

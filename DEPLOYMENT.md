@@ -231,6 +231,24 @@ gcloud run deploy rcm-denial \
 
 ---
 
+## Option 6: Oracle Cloud Always Free (recommended for full stack, $0)
+
+Free forever VM with 4 ARM CPUs + 24GB RAM. Runs full docker-compose including Grafana.
+
+See **[DEPLOY_ORACLE_CLOUD.md](DEPLOY_ORACLE_CLOUD.md)** for the complete step-by-step guide.
+
+```bash
+# Summary:
+# 1. Create Always Free ARM VM (4 CPU, 24GB RAM)
+# 2. Open ports 8080, 3000, 9090
+# 3. Install Docker
+# 4. git clone + cp .env.example .env + set OPENAI_API_KEY
+# 5. docker compose up -d
+# 6. Web UI: http://<ip>:8080  |  Grafana: http://<ip>:3000
+```
+
+---
+
 ## Pre-Demo Checklist (all options)
 
 | # | Item | Command |

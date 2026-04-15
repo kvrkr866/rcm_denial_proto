@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RCM Denial Management — Hugging Face Spaces Dockerfile
+#
+# HF Spaces requires:
+#   - Port 7860 (mandatory)
+#   - Non-root user recommended
+#   - /data for persistent storage (HF-managed)
+#
+# Deploy: push this repo to a HF Space with Docker SDK
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user (HF recommendation)
+RUN useradd -m -u 1000 appuser
+
+WORKDIR /app
+
+# Install Python deps
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source and data
+COPY pyproject.toml .
+COPY src/ src/
+COPY data/ data/
+COPY .env.example .env.example
+
+# Install package
+RUN pip install --no-cache-dir -e .
+
+# Create runtime dirs with correct permissions
+RUN mkdir -p output logs data/metrics data/chroma_db data/eob_pdfs \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
+# HF Spaces mandatory port
+ENV WEB_PORT=7860 \
+    OUTPUT_DIR=/app/output \
+    LOG_DIR=/app/logs \
+    DATA_DIR=/app/data \
+    LOG_LEVEL=INFO
+
+EXPOSE 7860
+
+CMD ["rcm-denial", "web", "--host", "0.0.0.0", "--port", "7860"]

@@ -224,22 +224,36 @@ async def _handle_upload_v2(
     upload_icon, upload_label, file_state,
 ):
     """Handle CSV upload: update icon to tick, show filename on hover."""
-    # Handle different NiceGUI versions — content may be bytes or file-like
-    if hasattr(e, "content") and hasattr(e.content, "read"):
-        content = e.content.read().decode("utf-8")
-    elif hasattr(e, "content") and isinstance(e.content, bytes):
-        content = e.content.decode("utf-8")
-    elif hasattr(e, "files") and e.files:
-        # Newer NiceGUI versions use e.files
-        raw = e.files[0]
-        if hasattr(raw, "read"):
-            content = raw.read().decode("utf-8")
-        elif isinstance(raw, bytes):
-            content = raw.decode("utf-8")
-        else:
-            content = str(raw)
-    else:
-        ui.notify("Upload failed — unsupported format", type="negative")
+    # Handle different NiceGUI versions:
+    #   v2.x: e.content (file-like), e.name
+    #   v3.x: e.file (FileUpload with async read/text), e.file.name
+    content = None
+    filename = "uploaded.csv"
+
+    try:
+        if hasattr(e, "file") and e.file is not None:
+            # NiceGUI 3.x — e.file is FileUpload (async)
+            f = e.file
+            filename = getattr(f, "name", filename)
+            if hasattr(f, "text"):
+                # async text() method
+                content = await f.text("utf-8")
+            elif hasattr(f, "read"):
+                raw = await f.read()
+                content = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+        elif hasattr(e, "content"):
+            # NiceGUI 2.x — e.content is file-like or bytes
+            if hasattr(e.content, "read"):
+                content = e.content.read().decode("utf-8")
+            elif isinstance(e.content, bytes):
+                content = e.content.decode("utf-8")
+            filename = getattr(e, "name", filename)
+    except Exception as exc:
+        ui.notify(f"Upload read error: {exc}", type="negative")
+        return
+
+    if not content:
+        ui.notify("Upload failed — could not read file content", type="negative")
         return
 
     reader = csv.DictReader(io.StringIO(content))
@@ -250,9 +264,6 @@ async def _handle_upload_v2(
     tmp.write(content)
     tmp.close()
     state._csv_path = tmp.name
-
-    # Update upload button: show tick + filename on hover
-    filename = getattr(e, "name", None) or getattr(e, "file_name", None) or "uploaded.csv"
     file_state["name"] = filename
     upload_icon._props["name"] = "check_circle"
     upload_icon.classes(replace="text-green-600 text-lg")

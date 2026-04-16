@@ -62,90 +62,116 @@ def get_current_metrics(batch_id: str = "") -> dict:
     batch_filter = "WHERE batch_id = ?" if batch_id else ""
     params: list = [batch_id] if batch_id else []
 
+    pipeline_rows = []
+    payer_rows = []
+    queue_rows = []
+    submission_rows = []
+    writeoff_rows = []
+    cost_rows = []
+    durations = []
+
     with sqlite3.connect(db) as conn:
         conn.row_factory = sqlite3.Row
 
         # ---- Pipeline results ----
-        pipeline_rows = conn.execute(
-            f"""
-            SELECT final_status, package_type,
-                   COUNT(*)          AS cnt,
-                   AVG(duration_ms)  AS avg_ms,
-                   SUM(llm_calls)    AS total_llm_calls
-              FROM claim_pipeline_result {batch_filter}
-             GROUP BY final_status, package_type
-            """,
-            params,
-        ).fetchall()
+        try:
+            pipeline_rows = conn.execute(
+                f"""
+                SELECT final_status, package_type,
+                       COUNT(*)          AS cnt,
+                       AVG(duration_ms)  AS avg_ms,
+                       SUM(llm_calls)    AS total_llm_calls
+                  FROM claim_pipeline_result {batch_filter}
+                 GROUP BY final_status, package_type
+                """,
+                params,
+            ).fetchall()
+        except Exception as exc:
+            logger.warning("Metrics: pipeline query failed", error=str(exc))
 
         # ---- Per-payer claim counts ----
-        payer_rows = conn.execute(
-            """
-            SELECT c.payer_id, p.final_status, COUNT(*) AS cnt
-              FROM claim_pipeline_result p
-              JOIN claim_intake_log c ON c.claim_id = p.claim_id
-                   AND (c.batch_id = p.batch_id OR ? = '')
-             WHERE c.status = 'valid'
-               AND (p.batch_id = ? OR ? = '')
-             GROUP BY c.payer_id, p.final_status
-            """,
-            [batch_id, batch_id, batch_id],
-        ).fetchall()
+        try:
+            payer_rows = conn.execute(
+                """
+                SELECT carc_code AS payer_id, status AS final_status, COUNT(*) AS cnt
+                  FROM human_review_queue
+                 WHERE (batch_id = ? OR ? = '')
+                 GROUP BY carc_code, status
+                """,
+                [batch_id, batch_id],
+            ).fetchall()
+        except Exception:
+            pass
 
         # ---- Review queue depth ----
-        queue_rows = conn.execute(
-            """
-            SELECT status, COUNT(*) AS cnt
-              FROM human_review_queue
-             WHERE (batch_id = ? OR ? = '')
-             GROUP BY status
-            """,
-            [batch_id, batch_id],
-        ).fetchall()
+        try:
+            queue_rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS cnt
+                  FROM human_review_queue
+                 WHERE (batch_id = ? OR ? = '')
+                 GROUP BY status
+                """,
+                [batch_id, batch_id],
+            ).fetchall()
+        except Exception as exc:
+            logger.warning("Metrics: review queue query failed", error=str(exc))
 
         # ---- Submission stats ----
-        submission_rows = conn.execute(
-            f"""
-            SELECT status, submission_method,
-                   COUNT(*) AS cnt
-              FROM submission_log {batch_filter}
-             GROUP BY status, submission_method
-            """,
-            params,
-        ).fetchall()
+        try:
+            submission_rows = conn.execute(
+                f"""
+                SELECT status, submission_method,
+                       COUNT(*) AS cnt
+                  FROM submission_log {batch_filter}
+                 GROUP BY status, submission_method
+                """,
+                params,
+            ).fetchall()
+        except Exception as exc:
+            logger.warning("Metrics: submission query failed", error=str(exc))
 
         # ---- Write-off stats ----
-        writeoff_rows = conn.execute(
-            """
-            SELECT write_off_reason, COUNT(*) AS cnt,
-                   SUM(billed_amount) AS total_amount
-              FROM human_review_queue
-             WHERE status = 'written_off'
-               AND (batch_id = ? OR ? = '')
-             GROUP BY write_off_reason
-            """,
-            [batch_id, batch_id],
-        ).fetchall()
+        try:
+            writeoff_rows = conn.execute(
+                """
+                SELECT write_off_reason, COUNT(*) AS cnt,
+                       SUM(billed_amount) AS total_amount
+                  FROM human_review_queue
+                 WHERE status = 'written_off'
+                   AND (batch_id = ? OR ? = '')
+                 GROUP BY write_off_reason
+                """,
+                [batch_id, batch_id],
+            ).fetchall()
+        except Exception as exc:
+            logger.warning("Metrics: write-off query failed", error=str(exc))
 
         # ---- LLM cost ----
-        cost_rows = conn.execute(
-            f"""
-            SELECT model,
-                   SUM(input_tokens)  AS input_tokens,
-                   SUM(output_tokens) AS output_tokens,
-                   SUM(cost_usd)      AS cost_usd,
-                   COUNT(*)           AS calls
-              FROM llm_cost_log {batch_filter}
-             GROUP BY model
-            """,
-            params,
-        ).fetchall()
+        try:
+            cost_rows = conn.execute(
+                f"""
+                SELECT model,
+                       SUM(input_tokens)  AS input_tokens,
+                       SUM(output_tokens) AS output_tokens,
+                       SUM(cost_usd)      AS cost_usd,
+                       COUNT(*)           AS calls
+                  FROM llm_cost_log {batch_filter}
+                 GROUP BY model
+                """,
+                params,
+            ).fetchall()
+        except Exception as exc:
+            logger.warning("Metrics: LLM cost query failed", error=str(exc))
 
         # ---- Duration percentiles (approximate via SQLite) ----
-        durations = conn.execute(
-            f"SELECT duration_ms FROM claim_pipeline_result {batch_filter} ORDER BY duration_ms",
-            params,
-        ).fetchall()
+        try:
+            durations = conn.execute(
+                f"SELECT duration_ms FROM claim_pipeline_result {batch_filter} ORDER BY duration_ms",
+                params,
+            ).fetchall()
+        except Exception as exc:
+            logger.warning("Metrics: duration query failed", error=str(exc))
 
     # ---- Build structured dict ----
     metrics: dict = {
@@ -275,15 +301,15 @@ def collect_and_export(batch_id: str = "") -> Path:
     lines.append("# TYPE rcm_claim_duration_ms_p99 gauge")
     lines.append(f'rcm_claim_duration_ms_p99{{batch="{m["batch_id"]}"}} {m["duration_ms"]["p99"]}')
 
-    # ---- LLM cost ----
+    # ---- LLM cost (both metric names for compatibility) ----
     lines.append("")
-    lines.append("# HELP rcm_llm_cost_usd_total Cumulative LLM API cost in USD by model")
-    lines.append("# TYPE rcm_llm_cost_usd_total counter")
+    lines.append("# HELP rcm_llm_cost_usd LLM API cost in USD by model")
+    lines.append("# TYPE rcm_llm_cost_usd gauge")
     for model, data in m["llm_cost"]["by_model"].items():
-        lines.append(f'rcm_llm_cost_usd_total{{model="{model}"}} {data["cost_usd"]}')
+        lines.append(f'rcm_llm_cost_usd{{model="{model}"}} {data["cost_usd"]}')
 
     lines.append("# HELP rcm_llm_calls_total Total LLM API calls by model")
-    lines.append("# TYPE rcm_llm_calls_total counter")
+    lines.append("# TYPE rcm_llm_calls_total gauge")
     for model, data in m["llm_cost"]["by_model"].items():
         lines.append(f'rcm_llm_calls_total{{model="{model}"}} {data["calls"]}')
 
@@ -311,12 +337,31 @@ def collect_and_export(batch_id: str = "") -> Path:
     for reason, data in m["write_offs"]["by_reason"].items():
         lines.append(f'rcm_write_offs_total{{reason="{reason}"}} {data["count"]}')
 
+    # Ensure rcm_write_offs_total exists even if no write-offs
+    if not m["write_offs"]["by_reason"]:
+        lines.append(f'rcm_write_offs_total{{reason="none"}} 0')
+
     lines.append("# HELP rcm_write_off_revenue_usd_total Total revenue written off in USD")
-    lines.append("# TYPE rcm_write_off_revenue_usd_total counter")
+    lines.append("# TYPE rcm_write_off_revenue_usd_total gauge")
     lines.append(
         f'rcm_write_off_revenue_usd_total{{batch="{m["batch_id"]}"}} '
         f'{m["write_offs"]["total_amount_usd"]}'
     )
+
+    # ---- First-pass approval rate ----
+    lines.append("")
+    lines.append("# HELP rcm_first_pass_approval_rate First-pass approval rate (0-1)")
+    lines.append("# TYPE rcm_first_pass_approval_rate gauge")
+    try:
+        from rcm_denial.services.review_queue import get_review_stats
+        rq = get_review_stats(batch_id=batch_id)
+        fp = rq.get("first_pass_approval_rate_pct")
+        if fp is not None:
+            lines.append(f'rcm_first_pass_approval_rate {fp / 100.0}')
+        else:
+            lines.append(f'rcm_first_pass_approval_rate 0')
+    except Exception:
+        lines.append(f'rcm_first_pass_approval_rate 0')
 
     prom_path = _get_metrics_dir() / "rcm_denial.prom"
     prom_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

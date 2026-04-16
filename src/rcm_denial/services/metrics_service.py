@@ -490,5 +490,5 @@ def push_to_gateway(gateway_url: str, batch_id: str = "", job: str = "rcm_denial
 
     # ── Push ─────────────────────────────────────────────────
     grouping_key = {"batch_id": batch_id or "all_time"}
-    _push(job, registry=registry, gateway=gateway_url, grouping_key=grouping_key)
+    _push(gateway=gateway_url, job=job, registry=registry, grouping_key=grouping_key)
     logger.info("All metrics pushed to Pushgateway", gateway=gateway_url, job=job)

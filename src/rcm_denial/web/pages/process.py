@@ -602,6 +602,17 @@ async def _run_batch(
 
             ui.notify(f"Batch complete: {len(state.completed)} claims", type="positive")
 
+            # Push metrics to Prometheus Pushgateway (for Grafana)
+            try:
+                from rcm_denial.config.settings import settings as _settings
+                if _settings.metrics_export_after_batch:
+                    from rcm_denial.services.metrics_service import collect_and_export, push_to_gateway
+                    collect_and_export(batch_id=state.batch_id)
+                    if _settings.prometheus_pushgateway_url:
+                        push_to_gateway(_settings.prometheus_pushgateway_url, batch_id=state.batch_id)
+            except Exception:
+                pass  # non-fatal
+
     except Exception as exc:
         center_container.clear()
         with center_container:

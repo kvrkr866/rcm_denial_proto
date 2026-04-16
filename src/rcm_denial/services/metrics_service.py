@@ -391,7 +391,9 @@ def push_to_gateway(gateway_url: str, batch_id: str = "", job: str = "rcm_denial
         )
         return
 
-    m = get_current_metrics(batch_id=batch_id)
+    # Always push ALL-TIME cumulative metrics so Grafana stays in sync
+    # with NiceGUI stats (which queries SQLite for all history).
+    m = get_current_metrics(batch_id="")
     registry = CollectorRegistry()
 
     # ── Claims processed (by status + package_type) ──────────
@@ -489,6 +491,5 @@ def push_to_gateway(gateway_url: str, batch_id: str = "", job: str = "rcm_denial
         pass
 
     # ── Push ─────────────────────────────────────────────────
-    grouping_key = {"batch_id": batch_id or "all_time"}
-    _push(gateway=gateway_url, job=job, registry=registry, grouping_key=grouping_key)
+    _push(gateway=gateway_url, job=job, registry=registry, grouping_key={})
     logger.info("All metrics pushed to Pushgateway", gateway=gateway_url, job=job)

@@ -224,7 +224,24 @@ async def _handle_upload_v2(
     upload_icon, upload_label, file_state,
 ):
     """Handle CSV upload: update icon to tick, show filename on hover."""
-    content = e.content.read().decode("utf-8")
+    # Handle different NiceGUI versions — content may be bytes or file-like
+    if hasattr(e, "content") and hasattr(e.content, "read"):
+        content = e.content.read().decode("utf-8")
+    elif hasattr(e, "content") and isinstance(e.content, bytes):
+        content = e.content.decode("utf-8")
+    elif hasattr(e, "files") and e.files:
+        # Newer NiceGUI versions use e.files
+        raw = e.files[0]
+        if hasattr(raw, "read"):
+            content = raw.read().decode("utf-8")
+        elif isinstance(raw, bytes):
+            content = raw.decode("utf-8")
+        else:
+            content = str(raw)
+    else:
+        ui.notify("Upload failed — unsupported format", type="negative")
+        return
+
     reader = csv.DictReader(io.StringIO(content))
     rows = list(reader)
 
@@ -235,7 +252,7 @@ async def _handle_upload_v2(
     state._csv_path = tmp.name
 
     # Update upload button: show tick + filename on hover
-    filename = getattr(e, "name", "uploaded.csv") or "uploaded.csv"
+    filename = getattr(e, "name", None) or getattr(e, "file_name", None) or "uploaded.csv"
     file_state["name"] = filename
     upload_icon._props["name"] = "check_circle"
     upload_icon.classes(replace="text-green-600 text-lg")

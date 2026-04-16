@@ -58,10 +58,10 @@ services:
       - ./logs:/app/logs
       # Mount .env for configuration
       - ./.env:/app/.env:ro
-      # Mount SOP documents (read-only)
-      - ./data/sop_documents:/app/data/sop_documents:ro
+      # Mount SOP documents (writable — manifest.json is written here)
+      - ./data/sop_documents:/app/data/sop_documents
       # Mount evals golden cases
-      - ./data/evals:/app/data/evals:ro
+      - ./data/evals:/app/data/evals
     environment:
       ENV: production
       METRICS_EXPORT_AFTER_BATCH: "true"
@@ -103,7 +103,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./data/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data/observability/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -145,7 +145,7 @@ services:
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./data/observability/grafana_provisioning:/etc/grafana/provisioning:ro
+      - ./data/observability/grafana_provisioning:/etc/grafana/provisioning
     depends_on:
       - prometheus
     healthcheck:
@@ -178,9 +178,9 @@ services:
     restart: unless-stopped
     networks: [rcm_net]
     volumes:
-      - ./data/observability/promtail_config.yaml:/etc/promtail/config.yaml:ro
-      - ./logs:/app/logs:ro
-      - ./output:/app/output:ro
+      - ./data/observability/promtail_config.yaml:/etc/promtail/config.yaml
+      - ./logs:/app/logs
+      - ./output:/app/output
     command: -config.file=/etc/promtail/config.yaml
     depends_on:
       - loki

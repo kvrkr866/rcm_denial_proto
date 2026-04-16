@@ -249,6 +249,12 @@ See **[DEPLOY_ORACLE_CLOUD.md](DEPLOY_ORACLE_CLOUD.md)** for the complete step-b
 
 ---
 
+## Option 7: Google Cloud — $300 Free Credits (recommended)
+
+See **[DEPLOY_GOOGLE_CLOUD.md](DEPLOY_GOOGLE_CLOUD.md)** for the complete step-by-step guide.
+
+---
+
 ## Pre-Demo Checklist (all options)
 
 | # | Item | Command |

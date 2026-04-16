@@ -340,7 +340,8 @@ output/CLM-33001/
 ### Sharing the demo
 
 See **[DEPLOYMENT.md](DEPLOYMENT.md)** for deployment options:
-- **Oracle Cloud Always Free** (recommended) -- 4 CPU + 24GB RAM, full stack with Grafana, $0 forever. See **[DEPLOY_ORACLE_CLOUD.md](DEPLOY_ORACLE_CLOUD.md)**
+- **Google Cloud** (recommended) -- $300 free credits, 4GB RAM, full stack with Grafana. See **[DEPLOY_GOOGLE_CLOUD.md](DEPLOY_GOOGLE_CLOUD.md)**
+- **Oracle Cloud Always Free** -- 4 CPU + 24GB RAM, $0 forever (if ARM available in your region). See **[DEPLOY_ORACLE_CLOUD.md](DEPLOY_ORACLE_CLOUD.md)**
 - **ngrok** (5 min) -- share from your machine via public URL
 - **Railway.app** (10 min) -- git push to deploy, free tier
 - **Render.com** (10 min) -- Docker deploy, free tier

@@ -228,15 +228,22 @@ def _render_stats(data: dict, batch_id: str) -> None:
     review = data.get("review_outcomes", {})
     submissions = data.get("submissions", {})
 
-    total_loaded = intake.get("total", 0)
-    total_processed = timing.get("total", 0)
-    total_approved = review.get("approved", {}).get("cnt", 0) + review.get("submitted", {}).get("cnt", 0)
-    total_pending = review.get("pending", {}).get("cnt", 0) + review.get("re_processed", {}).get("cnt", 0)
-    total_rerouted = review.get("re_routed", {}).get("cnt", 0)
-    total_writeoff = review.get("written_off", {}).get("cnt", 0)
-    total_submitted = submissions.get("submitted", 0)
-    total_sub_failed = submissions.get("failed", 0)
-    total_amount = sum(v.get("total_amount", 0) or 0 for v in review.values())
+    # Safe int/float extraction — DB may return None for SUM/COUNT/AVG
+    def _int(val) -> int:
+        return int(val) if val is not None else 0
+
+    def _float(val) -> float:
+        return float(val) if val is not None else 0.0
+
+    total_loaded = _int(intake.get("total"))
+    total_processed = _int(timing.get("total"))
+    total_approved = _int(review.get("approved", {}).get("cnt")) + _int(review.get("submitted", {}).get("cnt"))
+    total_pending = _int(review.get("pending", {}).get("cnt")) + _int(review.get("re_processed", {}).get("cnt"))
+    total_rerouted = _int(review.get("re_routed", {}).get("cnt"))
+    total_writeoff = _int(review.get("written_off", {}).get("cnt"))
+    total_submitted = _int(submissions.get("submitted"))
+    total_sub_failed = _int(submissions.get("failed"))
+    total_amount = sum(_float(v.get("total_amount")) for v in review.values())
 
     # ── Row 1: KPI cards ──────────────────────────────────────
     with ui.grid(columns=5).classes("w-full gap-3"):
@@ -247,9 +254,9 @@ def _render_stats(data: dict, batch_id: str) -> None:
         _kpi("Billed Amount at Risk", f"${total_amount:,.0f}", "blue")
 
     ehr = data.get("ehr_sync", {})
-    ehr_synced = ehr.get("synced", 0)
-    ehr_pending = ehr.get("pending_sync", 0)
-    ehr_failed = ehr.get("sync_failed", 0)
+    ehr_synced = _int(ehr.get("synced"))
+    ehr_pending = _int(ehr.get("pending_sync"))
+    ehr_failed = _int(ehr.get("sync_failed"))
     fully_processed = ehr_synced  # submitted + EHR updated = fully done
 
     with ui.grid(columns=5).classes("w-full gap-3 mt-1"):
@@ -266,7 +273,7 @@ def _render_stats(data: dict, batch_id: str) -> None:
              "orange" if ehr_pending > 0 else "green")
         _kpi("EHR Sync Failed", str(ehr_failed),
              "red" if ehr_failed > 0 else "green")
-        _kpi("Total Dispositions", str(ehr.get("total", 0)), "blue")
+        _kpi("Total Dispositions", str(_int(ehr.get("total"))), "blue")
 
     ui.separator().classes("mt-2")
 
@@ -276,10 +283,10 @@ def _render_stats(data: dict, batch_id: str) -> None:
         # LEFT: Processing time + CARC breakdown
         with ui.column().classes("flex-1 gap-3"):
             ui.label("Processing Time").classes("text-sm font-semibold text-gray-700")
-            if timing and timing.get("avg_ms"):
-                avg_ms = timing.get("avg_ms") or 0
-                min_ms = timing.get("min_ms") or 0
-                max_ms = timing.get("max_ms") or 0
+            if timing and _float(timing.get("avg_ms")) > 0:
+                avg_ms = _float(timing.get("avg_ms"))
+                min_ms = _float(timing.get("min_ms"))
+                max_ms = _float(timing.get("max_ms"))
                 with ui.grid(columns=3).classes("w-full gap-2"):
                     _kpi("Average", f"{avg_ms / 1000:.1f}s", "blue")
                     _kpi("Fastest", f"{min_ms / 1000:.1f}s", "green")
@@ -363,7 +370,7 @@ def _render_stats(data: dict, batch_id: str) -> None:
             ui.label("Write-Off Revenue Impact").classes("text-sm font-semibold text-gray-700")
             write_offs = data.get("write_offs", [])
             if write_offs:
-                total_wo = sum(r.get("amount", 0) or 0 for r in write_offs)
+                total_wo = sum(_float(r.get("amount")) for r in write_offs)
                 ui.label(f"Total Lost: ${total_wo:,.2f}").classes("text-lg font-bold text-red-600")
                 cols = [
                     {"name": "reason", "label": "Reason", "field": "reason"},
@@ -371,9 +378,9 @@ def _render_stats(data: dict, batch_id: str) -> None:
                     {"name": "amount", "label": "Amount", "field": "amount"},
                 ]
                 rows = [{
-                    "reason": r["write_off_reason"].replace("_", " ").title(),
-                    "count": r["cnt"],
-                    "amount": f"${(r.get('amount') or 0):,.0f}",
+                    "reason": (r.get("write_off_reason") or "unknown").replace("_", " ").title(),
+                    "count": _int(r.get("cnt")),
+                    "amount": f"${_float(r.get('amount')):,.0f}",
                 } for r in write_offs]
                 ui.table(columns=cols, rows=rows, row_key="reason") \
                     .props("dense flat").classes("w-full")

@@ -327,18 +327,18 @@ def collect_and_export(batch_id: str = "") -> Path:
 
 def push_to_gateway(gateway_url: str, batch_id: str = "", job: str = "rcm_denial") -> None:
     """
-    Push current metrics to a Prometheus Pushgateway.
+    Push ALL current metrics to a Prometheus Pushgateway.
 
     Requires `prometheus_client` to be installed:
         pip install prometheus_client
 
     Args:
-        gateway_url: e.g. "http://localhost:9091"
+        gateway_url: e.g. "http://pushgateway:9091"
         batch_id:    Label grouping key for the push
         job:         Prometheus job name (default: rcm_denial)
     """
     try:
-        from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway as _push
+        from prometheus_client import CollectorRegistry, Gauge, push_to_gateway as _push
     except ImportError:
         logger.warning(
             "prometheus_client not installed — skipping push. "
@@ -349,27 +349,101 @@ def push_to_gateway(gateway_url: str, batch_id: str = "", job: str = "rcm_denial
     m = get_current_metrics(batch_id=batch_id)
     registry = CollectorRegistry()
 
-    total_cost = Gauge(
-        "rcm_llm_cost_usd_total",
-        "Cumulative LLM API cost (USD)",
+    # ── Claims processed (by status + package_type) ──────────
+    claims = Gauge(
+        "rcm_claims_processed_total",
+        "Total denied claims processed",
+        ["status", "package_type"],
         registry=registry,
     )
-    total_cost.set(m["llm_cost"]["total_cost_usd"])
+    for key, data in m["pipeline"].items():
+        parts = key.split("_", 1)
+        status = parts[0]
+        pkg = parts[1] if len(parts) > 1 else "unknown"
+        claims.labels(status=status, package_type=pkg).set(data["count"])
 
-    write_off_cnt = Gauge(
+    # ── Duration percentiles ─────────────────────────────────
+    for pctl in ("p50", "p95", "p99"):
+        g = Gauge(
+            f"rcm_claim_duration_ms_{pctl}",
+            f"{pctl} claim processing duration (ms)",
+            registry=registry,
+        )
+        g.set(m["duration_ms"].get(pctl, 0))
+
+    # ── LLM cost by model ────────────────────────────────────
+    llm_cost = Gauge(
+        "rcm_llm_cost_usd",
+        "LLM API cost in USD",
+        ["model"],
+        registry=registry,
+    )
+    llm_calls = Gauge(
+        "rcm_llm_calls_total",
+        "Total LLM API calls",
+        ["model"],
+        registry=registry,
+    )
+    for model, data in m["llm_cost"]["by_model"].items():
+        llm_cost.labels(model=model).set(data["cost_usd"])
+        llm_calls.labels(model=model).set(data["calls"])
+
+    # ── Review queue depth ───────────────────────────────────
+    queue = Gauge(
+        "rcm_review_queue_depth",
+        "Claims in review queue by status",
+        ["status"],
+        registry=registry,
+    )
+    for status, cnt in m["review_queue"].items():
+        queue.labels(status=status).set(cnt)
+
+    # ── Submissions ──────────────────────────────────────────
+    subs = Gauge(
+        "rcm_submission_attempts_total",
+        "Submission attempts by status and method",
+        ["status", "method"],
+        registry=registry,
+    )
+    for key, cnt in m["submissions"].items():
+        parts = key.split("_", 1)
+        status = parts[0]
+        method = parts[1] if len(parts) > 1 else "unknown"
+        subs.labels(status=status, method=method).set(cnt)
+
+    # ── Write-offs ───────────────────────────────────────────
+    wo = Gauge(
         "rcm_write_offs_total",
-        "Total write-offs (target: 0)",
+        "Write-offs by reason",
+        ["reason"],
         registry=registry,
     )
-    write_off_cnt.set(m["write_offs"]["total_count"])
+    for reason, data in m["write_offs"]["by_reason"].items():
+        wo.labels(reason=reason).set(data["count"])
 
-    write_off_rev = Gauge(
-        "rcm_write_off_revenue_usd",
+    wo_rev = Gauge(
+        "rcm_write_off_revenue_usd_total",
         "Revenue written off (USD)",
         registry=registry,
     )
-    write_off_rev.set(m["write_offs"]["total_amount_usd"])
+    wo_rev.set(m["write_offs"]["total_amount_usd"])
 
+    # ── First-pass approval rate ─────────────────────────────
+    try:
+        from rcm_denial.services.review_queue import get_review_stats
+        rq = get_review_stats(batch_id=batch_id)
+        fp_rate = rq.get("first_pass_approval_rate_pct")
+        if fp_rate is not None:
+            fp = Gauge(
+                "rcm_first_pass_approval_rate",
+                "First-pass approval rate (0-1)",
+                registry=registry,
+            )
+            fp.set(fp_rate / 100.0)
+    except Exception:
+        pass
+
+    # ── Push ─────────────────────────────────────────────────
     grouping_key = {"batch_id": batch_id or "all_time"}
     _push(job, registry=registry, gateway=gateway_url, grouping_key=grouping_key)
-    logger.info("Metrics pushed to Pushgateway", gateway=gateway_url, job=job)
+    logger.info("All metrics pushed to Pushgateway", gateway=gateway_url, job=job)

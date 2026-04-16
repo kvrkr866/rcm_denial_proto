@@ -41,6 +41,7 @@ pandas>=2.2.0
 # ── Networking & Retry ───────────────────────────────────────────────────────
 httpx>=0.27.0
 tenacity>=8.3.0           # Retry with exponential backoff
+prometheus_client>=0.20.0 # Push metrics to Prometheus Pushgateway
 
 # ── CLI & Logging ────────────────────────────────────────────────────────────
 click>=8.1.7

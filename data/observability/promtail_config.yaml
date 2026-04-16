@@ -1,15 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Promtail configuration — ships RCM Denial logs to Grafana Loki
 #
-# Usage:
-#   promtail -config.file=data/observability/promtail_config.yaml
-#
-# Prerequisites:
-#   Loki running at http://localhost:3100 (or update loki_url below)
-#   pip install promtail-client  (optional Python client alternative)
-#
-# Log format: structlog JSON — each line is a JSON object with keys:
-#   timestamp, level, event, claim_id, batch_id, run_id, ...
+# In Docker Compose: Loki is at "loki:3100", logs at /app/logs/
 # ─────────────────────────────────────────────────────────────────────────────
 
 server:
@@ -17,11 +9,10 @@ server:
   grpc_listen_port: 0
 
 positions:
-  # Promtail remembers the last read position in each log file
   filename: /tmp/promtail_positions.yaml
 
 clients:
-  - url: http://localhost:3100/loki/api/v1/push
+  - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
 
@@ -32,8 +23,8 @@ scrape_configs:
           - localhost
         labels:
           job:         rcm_denial
-          environment: development
-          __path__:    ./logs/*.log      # relative to working dir when promtail runs
+          environment: production
+          __path__:    /app/logs/*.log
 
     pipeline_stages:
 
@@ -46,10 +37,10 @@ scrape_configs:
             batch_id:   batch_id
             run_id:     run_id
             payer_id:   payer_id
-            agent:      agent
+            node:       node
             timestamp:  timestamp
 
-      # Promote parsed fields to Loki labels (keep label count low)
+      # Promote parsed fields to Loki labels
       - labels:
           level:    ~
           batch_id: ~
@@ -71,7 +62,7 @@ scrape_configs:
             - static_labels:
                 severity: info
 
-      # Extract timestamp from log payload (structlog uses ISO-8601)
+      # Extract timestamp from structlog ISO-8601
       - timestamp:
           source: timestamp
           format: RFC3339Nano
@@ -79,39 +70,37 @@ scrape_configs:
             - "2006-01-02T15:04:05.999999Z07:00"
             - "2006-01-02T15:04:05Z"
 
-  # ── Batch summary JSON files ───────────────────────────────────────────────
-  - job_name: rcm_denial_batch_summaries
+  # ── Audit log JSON files (per-claim) ─────────────────────────────────────
+  - job_name: rcm_denial_audit
     static_configs:
       - targets:
           - localhost
         labels:
-          job:         rcm_denial_summary
-          environment: development
-          __path__:    ./output/batch_summary_*.json
-    pipeline_stages:
-      - json:
-          expressions:
-            batch_id:    batch_id
-            completed:   completed
-            failed:      failed
-      - labels:
-          batch_id: ~
+          job:         rcm_denial_audit
+          environment: production
+          __path__:    /app/output/*/internal_audit/audit_log.json
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Loki query examples (LogQL):
+# Loki / Grafana query examples (LogQL):
 #
 #  All errors:
 #    {job="rcm_denial", level="error"}
 #
 #  Errors for a specific batch:
-#    {job="rcm_denial", batch_id="abc123"} | level="error"
+#    {job="rcm_denial", batch_id="B-260416-1234-001"} |= "error"
 #
-#  Claim processing events:
-#    {job="rcm_denial"} | json | event=~"Claim.*"
+#  All events for a specific claim:
+#    {job="rcm_denial"} |= "CLM-33001"
 #
-#  Write-off events (track revenue loss):
-#    {job="rcm_denial"} | json | event="Write-off finalized"
+#  Pipeline stage completions:
+#    {job="rcm_denial", level="info"} |= "completed"
 #
-#  LLM cost log:
-#    {job="rcm_denial"} | json | event="Batch LLM cost summary"
+#  Write-off events:
+#    {job="rcm_denial", level="warning"} |= "written off"
+#
+#  LLM call failures:
+#    {job="rcm_denial", level="warning"} |= "LLM" |= "failed"
+#
+#  Audit trail for a claim:
+#    {job="rcm_denial_audit"} |= "CLM-33001"
 # ─────────────────────────────────────────────────────────────────────────────

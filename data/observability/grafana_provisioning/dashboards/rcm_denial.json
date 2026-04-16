@@ -160,7 +160,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum(rcm_llm_cost_usd_total)",
+          "expr": "sum(rcm_llm_cost_usd)",
           "legendFormat": "LLM Cost"
         }
       ],
@@ -260,7 +260,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum by (model) (rcm_llm_cost_usd_total)",
+          "expr": "sum by (model) (rcm_llm_cost_usd)",
           "legendFormat": "{{model}}"
         }
       ],
@@ -550,6 +550,89 @@
       ],
       "title": "Claims by Routing Decision (Package Type)",
       "type": "bargauge"
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 51 },
+      "id": 107,
+      "title": "Logs — Errors & Audit Trail (Loki)",
+      "type": "row"
+    },
+
+    {
+      "datasource": { "type": "loki", "uid": "DS_LOKI" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
+      "id": 60,
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "DS_LOKI" },
+          "expr": "{job=\"rcm_denial\", level=~\"error|warning\"}",
+          "legendFormat": ""
+        }
+      ],
+      "title": "Errors & Warnings",
+      "type": "logs"
+    },
+
+    {
+      "datasource": { "type": "loki", "uid": "DS_LOKI" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
+      "id": 61,
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "DS_LOKI" },
+          "expr": "{job=\"rcm_denial\", level=\"info\"} |= \"completed\" or |= \"enqueued\" or |= \"approved\" or |= \"submitted\"",
+          "legendFormat": ""
+        }
+      ],
+      "title": "Claim Processing Audit Trail",
+      "type": "logs"
+    },
+
+    {
+      "datasource": { "type": "loki", "uid": "DS_LOKI" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 60 },
+      "id": 62,
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "DS_LOKI" },
+          "expr": "{job=\"rcm_denial\"}",
+          "legendFormat": ""
+        }
+      ],
+      "title": "All Application Logs (searchable)",
+      "type": "logs"
     }
 
   ],

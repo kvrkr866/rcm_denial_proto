@@ -59,13 +59,11 @@ def clear_all_data() -> dict:
     else:
         summary["metrics_cleared"] = False
 
-    # 4. Clear manifest (SOP collections remain — only reset manifest tracking)
-    manifest_path = settings.sop_documents_dir / "manifest.json"
-    if manifest_path.exists():
-        manifest_path.unlink()
-        summary["manifest_cleared"] = True
+    # NOTE: SOP RAG collections and manifest.json are NOT cleared.
+    # RAG KB is independent of claim processing history.
+    summary["rag_preserved"] = True
 
-    logger.warning("All demo data cleared", **summary)
+    logger.warning("Claim history cleared (RAG KB preserved)", **summary)
     return summary
 
 
@@ -79,6 +77,7 @@ def _clear_db_tables(db_path: Path) -> int:
         "human_review_queue",
         "submission_log",
         "llm_cost_log",
+        "claim_disposition",
     ]
     cleared = 0
     try:

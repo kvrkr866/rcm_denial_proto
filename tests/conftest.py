@@ -39,6 +39,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
         "rcm_denial.services.submission_service",
         "rcm_denial.services.submission_adapters",
         "rcm_denial.services.checkpoint_service",
+        "rcm_denial.services.claim_disposition",
     ):
         try:
             monkeypatch.setattr(f"{mod_path}._get_db_path", _get_db)
@@ -145,6 +146,40 @@ def isolated_data_dir(tmp_path, monkeypatch):
             status              TEXT    DEFAULT 'in_progress',
             updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(run_id, claim_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS claim_disposition (
+            id                      INTEGER  PRIMARY KEY AUTOINCREMENT,
+            claim_id                TEXT     NOT NULL,
+            patient_id              TEXT     NOT NULL,
+            batch_id                TEXT,
+            run_id                  TEXT,
+            payer_id                TEXT     NOT NULL,
+            payer_name              TEXT,
+            provider_id             TEXT,
+            provider_npi            TEXT,
+            invoice_number          TEXT,
+            date_of_service         TEXT,
+            billed_amount           REAL,
+            carc_code               TEXT,
+            rarc_code               TEXT,
+            denial_category         TEXT,
+            disposition             TEXT     NOT NULL,
+            package_type            TEXT,
+            submission_method       TEXT,
+            confirmation_number     TEXT,
+            submitted_at            TIMESTAMP,
+            payer_response_status   TEXT     DEFAULT 'pending',
+            paid_amount             REAL,
+            adjustment_amount       REAL,
+            payer_response_date     TIMESTAMP,
+            payer_notes             TEXT,
+            ehr_synced              INTEGER  DEFAULT 0,
+            ehr_sync_timestamp      TIMESTAMP,
+            ehr_sync_error          TEXT,
+            created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()

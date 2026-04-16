@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from nicegui import ui
 
+from rcm_denial.services.audit_service import get_logger
 from rcm_denial.web.layout import create_header, create_footer
+
+logger = get_logger(__name__)
 
 
 STATUS_COLORS = {
@@ -110,13 +113,44 @@ def _submit_queue_row(item: dict, refresh_callback) -> None:
                 ui.label(f"${amount:,.2f} | {payer} | Batch: {batch_id}") \
                     .classes("text-xs text-gray-500")
             with ui.row().classes("gap-2"):
-                async def do_submit(rid=run_id):
+                async def do_submit(rid=run_id, cid=claim_id):
                     try:
                         from rcm_denial.services.submission_service import submit_approved_claim
+                        from rcm_denial.services.review_queue import get_queue_item
+
                         result = submit_approved_claim(rid)
+
                         if result.success:
-                            ui.notify(f"Submitted: {claim_id} (conf: {result.confirmation_number})",
-                                      type="positive")
+                            # Record disposition + sync to EHR
+                            try:
+                                from rcm_denial.services.claim_disposition import (
+                                    record_disposition, sync_to_ehr,
+                                )
+                                queue_item = get_queue_item(rid)
+                                if queue_item:
+                                    record_disposition(
+                                        claim_id=cid,
+                                        patient_id=queue_item.get("claim_id", ""),
+                                        payer_id=payer or "",
+                                        batch_id=batch_id or "",
+                                        run_id=rid,
+                                        billed_amount=amount,
+                                        carc_code=queue_item.get("carc_code", ""),
+                                        rarc_code="",
+                                        denial_category=queue_item.get("denial_category", ""),
+                                        disposition="resubmitted" if queue_item.get("package_type") == "resubmission" else "appealed",
+                                        package_type=queue_item.get("package_type", ""),
+                                        submission_method=result.submission_method,
+                                        confirmation_number=result.confirmation_number,
+                                    )
+                                    sync_to_ehr(cid)
+                            except Exception as disp_exc:
+                                logger.warning("Disposition recording failed", error=str(disp_exc))
+
+                            ui.notify(
+                                f"Submitted: {cid} (conf: {result.confirmation_number}) — EHR updated",
+                                type="positive",
+                            )
                         else:
                             ui.notify(f"Submission failed: {result.error_detail}", type="negative")
                         await refresh_callback()

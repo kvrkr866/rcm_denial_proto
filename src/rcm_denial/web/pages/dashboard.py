@@ -29,7 +29,7 @@ def dashboard_page():
         with ui.grid(columns=4).classes("w-full gap-4"):
             _metric_card("Pipeline",     "Process denied claims",         "play_circle", "/process", "blue")
             _metric_card("Review Queue", "Approve, re-route, write off",  "rate_review", "/review",  "orange")
-            _metric_card("Statistics",   "Scorecard, LLM cost, impact",   "bar_chart",   "/stats",   "green")
+            _metric_card("Statistics",   "Claims, reviews, write-offs",   "bar_chart",   "/stats",   "green")
             _metric_card("Evaluations",  "Golden dataset, quality signals","science",     "/evals",   "purple")
 
         # ── Live stats summary ────────────────────────────────────

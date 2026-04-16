@@ -305,6 +305,51 @@ class ClaimInputRecord(BaseModel):
             return [c.strip() for c in v.split(",") if c.strip()]
         return []
 
+    @field_validator(
+        "date_of_service", "denial_date", "patient_dob", "appeal_deadline",
+        mode="before",
+    )
+    @classmethod
+    def parse_flexible_date(cls, v: Any) -> Optional[date]:
+        """
+        Accepts multiple date formats:
+          YYYY-MM-DD  (ISO standard)
+          DD-MM-YYYY  (common in spreadsheets)
+          MM-DD-YYYY  (US format)
+          DD/MM/YYYY, MM/DD/YYYY, YYYY/MM/DD
+          Also handles pandas Timestamp objects.
+        """
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        if isinstance(v, date):
+            return v
+
+        from datetime import datetime as dt
+
+        text = str(v).strip()
+
+        # Try common formats in order of specificity
+        formats = [
+            "%Y-%m-%d",     # 2025-08-15 (ISO)
+            "%d-%m-%Y",     # 15-08-2025 (DD-MM-YYYY)
+            "%m-%d-%Y",     # 08-15-2025 (MM-DD-YYYY)
+            "%Y/%m/%d",     # 2025/08/15
+            "%d/%m/%Y",     # 15/08/2025
+            "%m/%d/%Y",     # 08/15/2025
+            "%Y-%m-%dT%H:%M:%S",  # ISO with time
+            "%d-%b-%Y",     # 15-Aug-2025
+            "%b %d, %Y",   # Aug 15, 2025
+        ]
+
+        for fmt in formats:
+            try:
+                return dt.strptime(text, fmt).date()
+            except ValueError:
+                continue
+
+        # Last resort: let Pydantic try its default parsing
+        return v
+
     @field_validator("billed_amount", "contracted_rate", "paid_amount", mode="before")
     @classmethod
     def parse_currency(cls, v: Any) -> Optional[float]:

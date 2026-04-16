@@ -180,7 +180,7 @@ class Settings(BaseSettings):
         description="Comma-separated user:password pairs (e.g. 'admin:admin,reviewer:pass123')",
     )
     web_port: int = Field(
-        default=8080,
+        default=8888,
         description="NiceGUI web UI port",
     )
     grafana_port: int = Field(

@@ -61,6 +61,20 @@ class BatchState:
         self.is_running: bool = False
         self.cancel_requested: bool = False # stop after current claim
         self.batch_id: str = ""
+        self.batch_seq: int = 1             # auto-increment per upload
+
+
+# Module-level persistent state — survives page navigation
+_session_state: dict[str, BatchState] = {}
+
+
+def _get_session_state() -> BatchState:
+    """Get or create session-scoped BatchState that survives page navigation."""
+    from nicegui import app
+    session_id = app.storage.user.get("_session_id", "default")
+    if session_id not in _session_state:
+        _session_state[session_id] = BatchState()
+    return _session_state[session_id]
 
 
 @ui.page("/process")
@@ -68,10 +82,16 @@ def process_page():
     from rcm_denial.web.auth import require_auth
     if not require_auth():
         return
+
+    from nicegui import app
+    # Ensure session ID exists
+    if "_session_id" not in app.storage.user:
+        app.storage.user["_session_id"] = f"s-{datetime.now().strftime('%H%M%S')}"
+
     create_header()
 
-    state = BatchState()
-    file_state = {"name": None}  # track uploaded filename
+    state = _get_session_state()
+    file_state = {"name": app.storage.user.get("_csv_filename", None)}
 
     with ui.column().classes("w-full max-w-7xl mx-auto px-4 py-1 gap-1") \
             .style("height: calc(100vh - 80px)"):
@@ -160,6 +180,24 @@ def process_page():
                 completed_container = ui.column() \
                     .classes("w-full gap-1 overflow-auto flex-1")
 
+        # ── Restore state if returning to this page ───────────
+        if state.pending:
+            _rebuild_pending_panel(state, pending_container, pending_count)
+            # Restore upload indicator
+            if file_state.get("name"):
+                upload_icon._props["name"] = "check_circle"
+                upload_icon.classes(replace="text-green-600 text-lg")
+                upload_icon.update()
+                upload_label.text = f"{len(state.pending)} claims"
+                upload_label.update()
+
+        if state.completed:
+            completed_container.clear()
+            with completed_container:
+                for c in state.completed:
+                    _completed_claim_card(c)
+            completed_count.set_text(str(len(state.completed)))
+
     create_footer()
 
 
@@ -206,16 +244,24 @@ async def _handle_upload_v2(
     upload_label.tooltip(f"File: {filename}")
     upload_label.update()
 
-    # Populate pending list
+    # Clear old list and populate with new CSV
     state.pending = rows
     state.selected = set()
     state.completed = []
 
-    # Auto-generate fresh batch ID
-    batch_id_input.value = f"B-{datetime.now().strftime('%y%m%d-%H%M%S')}-001"
+    # Increment batch sequence and generate new batch ID
+    state.batch_seq += 1
+    batch_id_input.value = f"B-{datetime.now().strftime('%y%m%d-%H%M%S')}-{state.batch_seq:03d}"
+
+    # Persist filename in session storage for page navigation
+    try:
+        from nicegui import app
+        app.storage.user["_csv_filename"] = filename
+    except Exception:
+        pass
 
     _rebuild_pending_panel(state, pending_container, pending_count)
-    ui.notify(f"Loaded {len(rows)} claims from {filename}", type="positive")
+    ui.notify(f"Loaded {len(rows)} claims from {filename} (previous list cleared)", type="positive")
 
 
 async def _handle_upload(

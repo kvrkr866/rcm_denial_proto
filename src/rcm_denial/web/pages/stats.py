@@ -194,6 +194,20 @@ def _query_all_stats(batch_id: str = "") -> dict:
         except Exception:
             data["write_offs"] = []
 
+        # EHR sync status (from claim_disposition)
+        try:
+            row = conn.execute(
+                f"SELECT "
+                f"COUNT(*) as total, "
+                f"SUM(CASE WHEN ehr_synced = 1 THEN 1 ELSE 0 END) as synced, "
+                f"SUM(CASE WHEN ehr_synced = 0 THEN 1 ELSE 0 END) as pending_sync, "
+                f"SUM(CASE WHEN ehr_synced = -1 THEN 1 ELSE 0 END) as sync_failed "
+                f"FROM claim_disposition {where_batch}", params
+            ).fetchone()
+            data["ehr_sync"] = dict(row) if row else {"total": 0, "synced": 0, "pending_sync": 0, "sync_failed": 0}
+        except Exception:
+            data["ehr_sync"] = {"total": 0, "synced": 0, "pending_sync": 0, "sync_failed": 0}
+
     return data
 
 
@@ -232,12 +246,27 @@ def _render_stats(data: dict, batch_id: str) -> None:
         _kpi("Pending Review", str(total_pending), "orange")
         _kpi("Billed Amount at Risk", f"${total_amount:,.0f}", "blue")
 
+    ehr = data.get("ehr_sync", {})
+    ehr_synced = ehr.get("synced", 0)
+    ehr_pending = ehr.get("pending_sync", 0)
+    ehr_failed = ehr.get("sync_failed", 0)
+    fully_processed = ehr_synced  # submitted + EHR updated = fully done
+
     with ui.grid(columns=5).classes("w-full gap-3 mt-1"):
         _kpi("Re-routed (loop)", str(total_rerouted), "cyan")
         _kpi("Awaiting Submission", str(review.get("approved", {}).get("cnt", 0)), "orange")
         _kpi("Submitted to Payer", str(total_submitted), "green")
         _kpi("Submission Failed", str(total_sub_failed), "red" if total_sub_failed else "green")
         _kpi("Written Off", str(total_writeoff), "red" if total_writeoff else "green")
+
+    with ui.grid(columns=4).classes("w-full gap-3 mt-1"):
+        _kpi("Fully Processed + EHR Updated", str(fully_processed),
+             "green" if fully_processed > 0 else "gray")
+        _kpi("EHR Sync Pending", str(ehr_pending),
+             "orange" if ehr_pending > 0 else "green")
+        _kpi("EHR Sync Failed", str(ehr_failed),
+             "red" if ehr_failed > 0 else "green")
+        _kpi("Total Dispositions", str(ehr.get("total", 0)), "blue")
 
     ui.separator().classes("mt-2")
 

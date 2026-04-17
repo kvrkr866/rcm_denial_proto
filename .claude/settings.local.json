@@ -16,7 +16,8 @@
       "Bash(docker compose:*)",
       "Bash(echo '=== Root files ===' ls /mnt/e/rcm_study/rcm_denial_proto/*.md /mnt/e/rcm_study/rcm_denial_proto/*.json /mnt/e/rcm_study/rcm_denial_proto/*.yaml /mnt/e/rcm_study/rcm_denial_proto/*.svg /mnt/e/rcm_study/rcm_denial_proto/*.txt)",
       "Bash(sed \"s|/mnt/e/rcm_study/rcm_denial_proto/||\" __NEW_LINE_1979dea4be46a084__ echo echo '=== Deployment folder ===' ls /mnt/e/rcm_study/rcm_denial_proto/deployment/ 2)",
-      "Bash(/dev/null __NEW_LINE_1979dea4be46a084__ echo echo '=== README links check ===' grep -n deployment/ /mnt/e/rcm_study/rcm_denial_proto/README.md)"
+      "Bash(/dev/null __NEW_LINE_1979dea4be46a084__ echo echo '=== README links check ===' grep -n deployment/ /mnt/e/rcm_study/rcm_denial_proto/README.md)",
+      "Bash(ls -la /mnt/e/rcm_study/rcm_denial_proto/data/eob_pdfs/EOB_12345*)"
     ]
   }
 }

@@ -107,7 +107,12 @@ def _supervisor_route(state_dict: dict) -> str:
         routing_decision=decision,
     )
 
-    if decision == "write_off":
+    if not decision or state.is_complete:
+        # Claim was skipped (no EOB) — go straight to packaging for minimal output
+        next_node = "document_packaging_agent"
+        logger.warning("Claim skipped — routing to packaging for error report",
+                        claim_id=state.claim.claim_id)
+    elif decision == "write_off":
         next_node = "document_packaging_agent"
     else:
         next_node = "evidence_check_agent"

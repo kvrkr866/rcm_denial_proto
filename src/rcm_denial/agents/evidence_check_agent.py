@@ -56,40 +56,82 @@ def _rule_based_evidence_check(state: DenialWorkflowState) -> EvidenceCheckResul
     has_encounter_notes = bool(enriched and enriched.ehr_data and enriched.ehr_data.has_encounter_notes)
     has_auth = bool(enriched and enriched.ehr_data and enriched.ehr_data.has_auth_documentation)
     has_eob_remarks = bool(enriched and enriched.eob_data and enriched.eob_data.denial_remarks)
+    eob_detail = enriched.eob_data.denial_detail if (enriched and enriched.eob_data) else None
 
     # Build arguments from what IS available
     if has_encounter_notes:
         arguments.append("Physician encounter notes document medical necessity for date of service")
     if has_auth:
         arguments.append("Prior authorization records confirm service was pre-approved")
-    if has_eob_remarks:
+    if eob_detail:
+        arguments.append(
+            f"EOB denial: {eob_detail.major_code} ({eob_detail.major_description[:80]})"
+        )
+        arguments.append(
+            f"Specific issue: {eob_detail.minor_code} — {eob_detail.minor_description}"
+        )
+        arguments.append(f"Missing: {eob_detail.missing_summary}")
+    elif has_eob_remarks:
         arguments.append(f"EOB states: {enriched.eob_data.denial_remarks[0][:100]}")
     if claim.denial_reason:
         arguments.append(f"Addressing denial: {claim.denial_reason[:100]}")
 
-    # Evidence sufficient if we have encounter notes OR auth records (by category)
+    # Evidence sufficient based on what's missing (from EOB) and what's available
     sufficient = False
     needs_fetch = False
     fetch_description = ""
 
-    if category == "prior_auth":
-        sufficient = has_auth
-        if not sufficient:
-            gaps.append("Prior authorization approval document not retrieved from EHR")
-            needs_fetch = True
-            fetch_description = "Prior authorization records for the date of service"
-    elif category == "medical_necessity":
-        sufficient = has_encounter_notes
-        if not sufficient:
-            gaps.append("Clinical encounter notes not retrieved from EHR")
-            needs_fetch = True
-            fetch_description = "Physician encounter notes and diagnostic test results"
-    elif category in ("coding_error", "timely_filing"):
-        sufficient = True   # rule-based correction, no clinical evidence needed
-    elif category == "duplicate_claim":
-        sufficient = True   # write-off path, no evidence needed
+    if eob_detail:
+        # EOB tells us exactly what's missing — check if we have it
+        summary_lower = eob_detail.missing_summary.lower()
+        if "medical record" in summary_lower or "operative" in summary_lower:
+            sufficient = has_encounter_notes
+            if not sufficient:
+                gaps.append(
+                    f"{eob_detail.missing_summary} — to be retrieved from "
+                    f"{eob_detail.artifact_source} (fallback: {eob_detail.artifact_source_fallback})"
+                )
+                needs_fetch = True
+                fetch_description = f"{eob_detail.missing_summary} for date of service {claim.date_of_service}"
+        elif "authorization" in summary_lower or "auth" in summary_lower:
+            sufficient = has_auth
+            if not sufficient:
+                gaps.append(
+                    f"{eob_detail.missing_summary} — to be retrieved from "
+                    f"{eob_detail.artifact_source} (fallback: {eob_detail.artifact_source_fallback})"
+                )
+                needs_fetch = True
+                fetch_description = f"Prior authorization reference number for claim {claim.claim_id}"
+        elif "provider" in summary_lower or "npi" in summary_lower:
+            # Provider info is typically available from claim data
+            sufficient = bool(claim.provider_npi or claim.provider_id)
+            if not sufficient:
+                gaps.append(
+                    f"{eob_detail.missing_summary} — to be retrieved from "
+                    f"{eob_detail.artifact_source}"
+                )
+        else:
+            sufficient = has_encounter_notes
     else:
-        sufficient = has_encounter_notes
+        # No EOB detail — use category-based logic as before
+        if category == "prior_auth":
+            sufficient = has_auth
+            if not sufficient:
+                gaps.append("Prior authorization document not available")
+                needs_fetch = True
+                fetch_description = "Prior authorization records for the date of service"
+        elif category == "medical_necessity":
+            sufficient = has_encounter_notes
+            if not sufficient:
+                gaps.append("Clinical encounter notes not available")
+                needs_fetch = True
+                fetch_description = "Physician encounter notes and diagnostic test results"
+        elif category in ("coding_error", "timely_filing"):
+            sufficient = True
+        elif category == "duplicate_claim":
+            sufficient = True
+        else:
+            sufficient = has_encounter_notes
 
     return EvidenceCheckResult(
         claim_id=claim.claim_id,
@@ -100,7 +142,10 @@ def _rule_based_evidence_check(state: DenialWorkflowState) -> EvidenceCheckResul
         additional_fetch_description=fetch_description,
         recommended_action_confirmed=action,  # type: ignore[arg-type]
         confidence_score=0.75 if sufficient else 0.55,
-        reasoning="Rule-based evidence assessment (LLM unavailable)",
+        reasoning=(
+            f"Evidence assessment based on EOB denial detail: {eob_detail.missing_summary}"
+            if eob_detail else "Evidence assessment (EOB not available — using category-based rules)"
+        ),
     )
 
 
@@ -128,11 +173,20 @@ def _build_evidence_prompt(state: DenialWorkflowState) -> str:
     eob_summary = "No EOB data"
     if enriched and enriched.eob_data:
         eob = enriched.eob_data
-        eob_summary = (
-            f"CARC codes: {eob.carc_codes_found}, "
-            f"RARC codes: {eob.rarc_codes_found}, "
-            f"Denial remarks: {eob.denial_remarks}"
-        )
+        if eob.denial_detail:
+            d = eob.denial_detail
+            eob_summary = (
+                f"Denial Code (from EOB): {d.major_code} — {d.major_description}\n"
+                f"Remark Code: {d.minor_code} — {d.minor_description}\n"
+                f"What is missing: {d.missing_summary}\n"
+                f"Where to retrieve: {d.artifact_source} (fallback: {d.artifact_source_fallback})"
+            )
+        else:
+            eob_summary = (
+                f"CARC codes: {eob.carc_codes_found}, "
+                f"RARC codes: {eob.rarc_codes_found}, "
+                f"Denial remarks: {eob.denial_remarks}"
+            )
 
     sop_steps = "No SOP retrieved"
     if enriched and enriched.sop_results:

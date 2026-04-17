@@ -105,7 +105,7 @@ def _init_queue_db() -> None:
 def _build_ai_summary(state) -> str:
     """
     Generates a concise decision-ready summary for the human reviewer.
-    Explains what the AI did, what it found, and why the claim was queued.
+    Explains the denial analysis, evidence found, and why the claim was queued.
     """
     from rcm_denial.services.review_queue_helpers import _flag_reasons
     claim = state.claim

@@ -623,10 +623,16 @@ def retrieve_sop_guidance(
     carc_code: str,
     rarc_code: Optional[str] = None,
     payer_id: str = "",
-    top_k: int = 3,
+    denial_description: str = "",
+    top_k: int = 5,
 ) -> list[SopResult]:
     """
     Retrieves relevant SOP documents using semantic search.
+
+    Uses BOTH denial codes AND the denial description for precise matching.
+    This ensures the SOP results are specific to the exact denial scenario
+    (e.g., CO-252 + M127 "missing medical record" finds the SOP section
+    about retrieving operative reports, not the generic CO-252 overview).
 
     Lookup order (per-payer → global → keyword):
       1. Payer-specific ChromaDB collection (sop_{payer_key})
@@ -634,9 +640,11 @@ def retrieve_sop_guidance(
       3. Keyword fallback — if ChromaDB unavailable
 
     Args:
-        carc_code: Primary CARC denial code.
-        rarc_code: Optional RARC remark code.
+        carc_code: Primary CARC denial code (e.g., "CO-252" or "252").
+        rarc_code: RARC remark code (e.g., "M127").
         payer_id:  Payer identifier — normalized to collection key.
+        denial_description: Natural language description of what's missing
+                            (e.g., "missing medical record"). Improves SOP match accuracy.
         top_k:     Maximum results to return.
 
     Returns:
@@ -652,13 +660,18 @@ def retrieve_sop_guidance(
         rarc_code=rarc_code,
         payer_id=payer_id,
         payer_key=payer_key,
+        denial_description=denial_description[:50] if denial_description else "",
     )
 
-    query = (
-        f"denial management procedure CARC {carc_code} "
-        f"{'RARC ' + rarc_code if rarc_code else ''} "
-        f"payer {payer_id}"
-    ).strip()
+    # Build a rich query with both codes AND description for precise matching
+    query_parts = [f"denial resolution procedure CO-{carc_code}"]
+    if rarc_code:
+        query_parts.append(f"remark code {rarc_code}")
+    if denial_description:
+        query_parts.append(denial_description)
+    else:
+        query_parts.append(f"payer {payer_id}")
+    query = " ".join(query_parts)
 
     try:
         embeddings = _make_embeddings()

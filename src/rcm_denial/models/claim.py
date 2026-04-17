@@ -293,18 +293,37 @@ class EhrData(BaseModel):
 # EOB OCR extraction result
 # ------------------------------------------------------------------ #
 
+class DenialCodeDetail(BaseModel):
+    """
+    Structured denial code extracted from EOB GLOSSARY section.
+    Major code = CARC (e.g., CO-252), Minor code = RARC (e.g., M127).
+    """
+    major_code: str = ""              # e.g., "CO-252"
+    major_description: str = ""       # Full description from GLOSSARY
+    minor_code: str = ""              # e.g., "M127"
+    minor_description: str = ""       # Full description from GLOSSARY
+    missing_summary: str = ""         # Natural summary of what's missing
+    artifact_source: str = ""         # Where to find it: "EHR", "PMS", "Payer Portal"
+    artifact_source_fallback: str = ""  # Fallback source if primary doesn't have it
+
+
 class EobExtractedData(BaseModel):
     claim_id: Optional[str] = None
     carc_codes_found: list[str] = Field(default_factory=list)
     rarc_codes_found: list[str] = Field(default_factory=list)
     denial_remarks: list[str] = Field(default_factory=list)
+    denial_detail: Optional[DenialCodeDetail] = Field(
+        default=None,
+        description="Structured denial codes + descriptions extracted from EOB GLOSSARY section",
+    )
     billed_amount: Optional[float] = None
     allowed_amount: Optional[float] = None
     adjustment_amount: Optional[float] = None
     paid_amount: Optional[float] = None
     raw_text_excerpt: str = ""
     ocr_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    extraction_method: str = "pytesseract"
+    extraction_method: str = "pymupdf"
+    eob_available: bool = True         # False when EOB file was not found
     extracted_at: datetime = Field(default_factory=datetime.utcnow)
 
 

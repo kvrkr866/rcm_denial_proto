@@ -67,9 +67,14 @@ async def _fetch_eob(eob_pdf_path: str | None) -> tuple[str, Any]:
         return "eob_error", str(exc)
 
 
-async def _fetch_sop(carc_code: str, rarc_code: str | None, payer_id: str) -> tuple[str, Any]:
+async def _fetch_sop(
+    carc_code: str, rarc_code: str | None, payer_id: str, denial_reason: str = "",
+) -> tuple[str, Any]:
     try:
-        return "sop", retrieve_sop_guidance(carc_code, rarc_code, payer_id)
+        return "sop", retrieve_sop_guidance(
+            carc_code, rarc_code, payer_id,
+            denial_description=denial_reason,
+        )
     except Exception as exc:
         return "sop_error", str(exc)
 
@@ -83,7 +88,7 @@ async def _enrich_async(state: DenialWorkflowState) -> EnrichedData:
         _fetch_payer(claim.payer_id, claim.cpt_codes, claim),
         _fetch_ehr(claim.provider_id, claim.patient_id, claim.date_of_service, claim),
         _fetch_eob(claim.eob_pdf_path),
-        _fetch_sop(claim.carc_code, claim.rarc_code, claim.payer_id),
+        _fetch_sop(claim.carc_code, claim.rarc_code, claim.payer_id, claim.denial_reason or ""),
         return_exceptions=False,
     )
 

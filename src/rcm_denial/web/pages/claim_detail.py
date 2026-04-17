@@ -4,7 +4,7 @@
 # Author:  RK (kvrkr866@gmail.com)
 # File name: web/pages/claim_detail.py
 # Purpose: Claim detail page — full view of a single claim
-#          including AI summary, analysis, appeal letter,
+#          including claim summary, analysis, appeal letter,
 #          audit trail, PDF download, and action buttons.
 #
 ##########################################################
@@ -61,8 +61,8 @@ def claim_detail_page(run_id: str):
             if item.get("is_urgent"):
                 _info_card("Priority", "URGENT", color="red")
 
-        # ── AI Summary ────────────────────────────────────────
-        ui.label("AI Summary").classes("text-xl font-semibold text-gray-700 mt-4")
+        # ── Claim Summary ─────────────────────────────────────
+        ui.label("Claim Summary").classes("text-xl font-semibold text-gray-700 mt-4")
         summary = item.get("ai_summary", "No summary available")
         with ui.card().classes("w-full bg-gray-50"):
             ui.label(summary).classes("whitespace-pre-wrap text-sm font-mono text-gray-700 p-2")

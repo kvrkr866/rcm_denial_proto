@@ -17,10 +17,212 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from rcm_denial.models.claim import EobExtractedData
+from rcm_denial.models.claim import DenialCodeDetail, EobExtractedData
 from rcm_denial.services.audit_service import get_logger
 
 logger = get_logger(__name__)
+
+
+# ------------------------------------------------------------------ #
+# GLOSSARY parser — extracts structured denial codes from EOB bottom
+# ------------------------------------------------------------------ #
+
+def _parse_glossary(raw_text: str) -> DenialCodeDetail | None:
+    """
+    Parse the GLOSSARY section at the bottom of an EOB PDF.
+
+    Format:
+        GLOSSARY: GROUP, REASON, MOA, REMARK AND REASON CODES
+        CO-252    An attachment/other documentation is required...
+        M127      Missing patient medical record for this service.
+
+    Returns DenialCodeDetail with major (CARC) and minor (RARC) codes
+    plus their full descriptions, a natural summary, and artifact source.
+    """
+    # Find GLOSSARY section
+    glossary_marker = "GLOSSARY:"
+    idx = raw_text.upper().find(glossary_marker.upper())
+    if idx < 0:
+        return None
+
+    glossary_text = raw_text[idx:]
+
+    # Pattern: code at start of line followed by description
+    # CARC codes: CO-nnn, PR-nnn, OA-nnn, PI-nnn, CR-nnn
+    # RARC codes: Mnnn, NNnn, MAnnn
+    code_pattern = re.compile(
+        r'^((?:CO|PR|OA|PI|CR)-\d{1,3}|[NM]A?\d{2,3})\s*\n((?:(?!^(?:CO|PR|OA|PI|CR)-\d|^[NM]A?\d).+\n?)*)',
+        re.MULTILINE,
+    )
+
+    matches = code_pattern.findall(glossary_text)
+
+    if not matches:
+        # Fallback: try simpler pattern
+        code_pattern2 = re.compile(
+            r'((?:CO|PR|OA|PI|CR)-\d{1,3})\s+(.*?)(?=(?:CO|PR|OA|PI|CR)-\d|[NM]A?\d|\Z)',
+            re.DOTALL,
+        )
+        matches2 = code_pattern2.findall(glossary_text)
+        rarc_pattern = re.compile(
+            r'([NM]A?\d{2,3})\s+(.*?)(?=(?:CO|PR|OA|PI|CR)-\d|[NM]A?\d|\Z)',
+            re.DOTALL,
+        )
+        rarc_matches = rarc_pattern.findall(glossary_text)
+        matches = matches2 + rarc_matches
+
+    if not matches:
+        return None
+
+    major_code = ""
+    major_desc = ""
+    minor_code = ""
+    minor_desc = ""
+
+    for code, desc in matches:
+        code = code.strip()
+        desc = " ".join(desc.split()).strip()  # normalize whitespace
+        # Remove trailing periods for clean summary
+        desc_clean = desc.rstrip(".")
+
+        if code.startswith(("CO-", "PR-", "OA-", "PI-", "CR-")):
+            # CARC (major code)
+            if not major_code:
+                major_code = code
+                major_desc = desc_clean
+        else:
+            # RARC (minor code)
+            if not minor_code:
+                minor_code = code
+                minor_desc = desc_clean
+
+    if not major_code and not minor_code:
+        return None
+
+    # Generate natural summary from minor description (or major if no minor)
+    summary_source = minor_desc or major_desc
+    missing_summary = _summarize_denial(summary_source)
+
+    # Map what's missing to where to find it
+    source, fallback = _map_artifact_source(missing_summary, major_code, minor_code)
+
+    detail = DenialCodeDetail(
+        major_code=major_code,
+        major_description=major_desc,
+        minor_code=minor_code,
+        minor_description=minor_desc,
+        missing_summary=missing_summary,
+        artifact_source=source,
+        artifact_source_fallback=fallback,
+    )
+
+    logger.info(
+        "EOB GLOSSARY parsed",
+        major_code=major_code,
+        minor_code=minor_code,
+        missing_summary=missing_summary,
+        source=source,
+    )
+
+    return detail
+
+
+def _summarize_denial(description: str) -> str:
+    """
+    Generate a natural short summary from the denial description.
+    e.g., "Missing patient medical record for this service" → "Missing medical record"
+    """
+    desc_lower = description.lower()
+
+    # Direct keyword matching for common denial patterns
+    if "missing" in desc_lower and "medical record" in desc_lower:
+        return "Missing medical record"
+    if "missing" in desc_lower and "operative" in desc_lower:
+        return "Missing operative report"
+    if "missing" in desc_lower and "pathology" in desc_lower:
+        return "Missing pathology report"
+    if "missing" in desc_lower and "clinical documentation" in desc_lower:
+        return "Missing clinical documentation"
+    if "missing" in desc_lower and "documentation reference" in desc_lower:
+        return "Missing authorization reference"
+    if "missing" in desc_lower and "ordering provider" in desc_lower:
+        return "Missing provider identifier"
+    if "missing" in desc_lower and "referring provider" in desc_lower:
+        return "Missing referring provider"
+    if "missing" in desc_lower and "authorization" in desc_lower:
+        return "Missing prior authorization"
+    if "attachment" in desc_lower and "documentation" in desc_lower:
+        return "Additional documentation required"
+    if "lacks information" in desc_lower or "billing error" in desc_lower:
+        return "Claim information incomplete"
+    if "not covered" in desc_lower or "not medically necessary" in desc_lower:
+        return "Medical necessity not established"
+    if "timely filing" in desc_lower or "filing limit" in desc_lower:
+        return "Timely filing exceeded"
+    if "duplicate" in desc_lower:
+        return "Duplicate claim submission"
+    if "eligibility" in desc_lower or "not eligible" in desc_lower:
+        return "Patient eligibility issue"
+    if "prior auth" in desc_lower or "precertification" in desc_lower:
+        return "Prior authorization required"
+    if "coordination" in desc_lower or "other payer" in desc_lower:
+        return "Coordination of benefits needed"
+
+    # Fallback: take first meaningful phrase
+    # Remove common filler words and truncate
+    words = description.split()
+    if len(words) <= 5:
+        return description
+    # Take first 5 meaningful words
+    return " ".join(words[:5])
+
+
+def _map_artifact_source(
+    summary: str,
+    major_code: str,
+    minor_code: str,
+) -> tuple[str, str]:
+    """
+    Map what's missing to WHERE to find it.
+    Returns (primary_source, fallback_source).
+    """
+    s = summary.lower()
+
+    # Medical records, reports, clinical docs → EHR first, then PMS
+    if any(kw in s for kw in [
+        "medical record", "operative report", "pathology report",
+        "clinical documentation", "chart notes",
+    ]):
+        return "EHR", "PMS"
+
+    # Provider identifier, NPI → PMS first, then EHR
+    if any(kw in s for kw in [
+        "provider identifier", "referring provider", "provider npi",
+    ]):
+        return "PMS", "EHR"
+
+    # Authorization, precertification → PMS first, then EHR
+    if any(kw in s for kw in [
+        "authorization", "precertification", "auth reference",
+    ]):
+        return "PMS", "EHR"
+
+    # Policy, eligibility, coordination → Payer Portal
+    if any(kw in s for kw in [
+        "eligibility", "coordination", "policy", "coverage",
+    ]):
+        return "Payer Portal", "PMS"
+
+    # Additional documentation (generic CO-252) → EHR first
+    if "documentation" in s or "additional" in s:
+        return "EHR", "PMS"
+
+    # Claim information incomplete (CO-16) → PMS first
+    if "information" in s or "incomplete" in s:
+        return "PMS", "EHR"
+
+    # Default
+    return "EHR", "PMS"
 
 
 class ToolExecutionError(Exception):
@@ -227,18 +429,29 @@ def extract_eob_data(eob_pdf_path: Optional[str]) -> EobExtractedData:
     """
     if not eob_pdf_path:
         logger.warning("No EOB PDF path provided — skipping OCR extraction")
-        return EobExtractedData(extraction_method="skipped")
+        return EobExtractedData(extraction_method="skipped", eob_available=False)
 
     pdf_path = Path(eob_pdf_path)
+    eob_available = pdf_path.exists()
 
-    if not pdf_path.exists():
-        logger.warning("EOB PDF file not found — using mock OCR", path=str(pdf_path))
-        raw_text, confidence = _get_mock_eob_text(), 0.75
-    else:
-        logger.info("Extracting text from EOB PDF", path=str(pdf_path))
-        raw_text, confidence = extract_text_from_pdf(pdf_path)
+    if not eob_available:
+        logger.warning(
+            "EOB PDF file not found — CSV data will be used as fallback",
+            path=str(pdf_path),
+        )
+        return EobExtractedData(
+            extraction_method="eob_not_found",
+            eob_available=False,
+            raw_text_excerpt=f"EOB file not found: {pdf_path}",
+        )
 
-    # Extract CARC codes
+    logger.info("Extracting text from EOB PDF", path=str(pdf_path))
+    raw_text, confidence = extract_text_from_pdf(pdf_path)
+
+    # ── Primary extraction: GLOSSARY section (source of truth) ──────
+    denial_detail = _parse_glossary(raw_text)
+
+    # ── Secondary: regex-based extraction for backward compatibility ──
     carc_matches = _CARC_PATTERN.findall(raw_text)
     carc_codes = list({
         (m[0] or m[1]).strip().upper()
@@ -246,7 +459,6 @@ def extract_eob_data(eob_pdf_path: Optional[str]) -> EobExtractedData:
         if (m[0] or m[1]).strip()
     })
 
-    # Extract RARC codes
     rarc_matches = _RARC_PATTERN.findall(raw_text)
     rarc_codes = list({
         (m[0] or m[1]).strip().upper()
@@ -254,8 +466,24 @@ def extract_eob_data(eob_pdf_path: Optional[str]) -> EobExtractedData:
         if (m[0] or m[1]).strip()
     })
 
+    # If GLOSSARY parsing succeeded, ensure codes are consistent
+    if denial_detail:
+        # Use GLOSSARY codes as source of truth
+        major_num = denial_detail.major_code.split("-", 1)[-1] if "-" in denial_detail.major_code else denial_detail.major_code
+        if major_num and major_num not in carc_codes:
+            carc_codes.insert(0, major_num)
+        if denial_detail.minor_code and denial_detail.minor_code not in rarc_codes:
+            rarc_codes.insert(0, denial_detail.minor_code)
+
     # Extract denial remarks
     denial_remarks = []
+    # Use GLOSSARY descriptions as primary remarks
+    if denial_detail:
+        if denial_detail.major_description:
+            denial_remarks.append(f"{denial_detail.major_code}: {denial_detail.major_description}")
+        if denial_detail.minor_description:
+            denial_remarks.append(f"{denial_detail.minor_code}: {denial_detail.minor_description}")
+    # Also extract any additional remarks from the body
     for pattern in _DENIAL_REMARK_PATTERNS:
         for match in pattern.findall(raw_text):
             remark = match.strip() if isinstance(match, str) else match[0].strip()
@@ -269,18 +497,24 @@ def extract_eob_data(eob_pdf_path: Optional[str]) -> EobExtractedData:
         carc_codes_found=carc_codes,
         rarc_codes_found=rarc_codes,
         denial_remarks=denial_remarks,
+        denial_detail=denial_detail,
         billed_amount=amounts.get("billed"),
         allowed_amount=amounts.get("allowed"),
         adjustment_amount=amounts.get("adjustment"),
         paid_amount=amounts.get("paid"),
-        raw_text_excerpt=raw_text[:1000],
+        raw_text_excerpt=raw_text[:1500],
         ocr_confidence=confidence,
+        extraction_method="pymupdf",
+        eob_available=True,
     )
 
     logger.info(
         "EOB extraction complete",
         carc_codes=carc_codes,
         rarc_codes=rarc_codes,
+        denial_detail_extracted=denial_detail is not None,
+        missing_summary=denial_detail.missing_summary if denial_detail else "N/A",
+        artifact_source=denial_detail.artifact_source if denial_detail else "N/A",
         remark_count=len(denial_remarks),
         confidence=round(confidence, 3),
     )

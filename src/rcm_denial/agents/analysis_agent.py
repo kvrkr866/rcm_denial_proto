@@ -1,25 +1,27 @@
 ##########################################################
 #
 # Project: RCM - Denial Management
-# Description: Agentic AI based Denial management activities
 # Author:  RK (kvrkr866@gmail.com)
 # File name: analysis_agent.py
-# Purpose: LangGraph node that performs CARC/RARC root cause
-#          analysis using a rule-based lookup table.
-#          NO LLM is used here — CARC codes are deterministic;
-#          routing based on them is faster, free, and consistent.
+# Purpose: LangGraph node — Denial root cause analysis.
 #
-#          LLM calls are reserved for:
-#            Call 1 — evidence_check_agent (is evidence sufficient?)
-#            Call 2 — response_agent (generate the response)
+#          Determines the denial root cause from TWO sources:
+#            1. EOB (source of truth) — major code + description,
+#               minor code + description, what's missing, where to find it
+#            2. Payer SOP (from RAG) — resolution steps per code combination
+#
+#          NO static CARC rules table — the EOB and SOP are the
+#          "rules engine". Every payer can have different procedures
+#          for the same CARC code.
+#
+#          If no EOB is available → claim is SKIPPED (flagged in
+#          audit log with reason).
 #
 ##########################################################
 
 from __future__ import annotations
 
-import json
 import time
-from pathlib import Path
 
 from rcm_denial.models.analysis import DenialAnalysis
 from rcm_denial.models.output import DenialWorkflowState
@@ -30,265 +32,186 @@ NODE_NAME = "analysis_agent"
 
 
 # ------------------------------------------------------------------ #
-# CARC reference (descriptions from carc_rarc_reference.json)
+# Determine denial category from EOB descriptions
 # ------------------------------------------------------------------ #
 
-def _load_carc_reference() -> dict:
-    ref_path = Path(__file__).parent.parent / "data" / "carc_rarc_reference.json"
-    if ref_path.exists():
-        with open(ref_path) as f:
-            return json.load(f)
-    return {}
-
-
-_CARC_REFERENCE: dict = _load_carc_reference()
-
-
-def _get_carc_description(code: str) -> str:
-    return (
-        _CARC_REFERENCE.get("carc_codes", {})
-        .get(code, {})
-        .get("description", f"CARC {code} — see payer EOB for details")
-    )
-
-
-def _get_rarc_description(code: str | None) -> str:
-    if not code:
-        return "No RARC code provided"
-    return (
-        _CARC_REFERENCE.get("rarc_codes", {})
-        .get(code, {})
-        .get("description", f"RARC {code} — see payer EOB for details")
-    )
-
-
-# ------------------------------------------------------------------ #
-# CARC → denial category + recommended action + missing items lookup
-#
-# Structure per entry:
-#   category          : denial_category literal
-#   action            : recommended_action literal
-#   correction_possible: bool
-#   missing_items     : common items missing for this denial type
-#   incorrect_items   : common items incorrect for this denial type
-#   confidence        : rule-based confidence (1.0 for well-known codes)
-# ------------------------------------------------------------------ #
-
-_CARC_RULES: dict[str, dict] = {
-    # ---- Timely filing ----
-    "29": {
-        "category": "timely_filing",
-        "action": "resubmit",
-        "correction_possible": True,
-        "missing_items": ["Proof of timely filing (clearinghouse report or certified mail receipt)"],
-        "incorrect_items": [],
-        "confidence": 0.95,
-        "reasoning": "Claim submitted past payer's timely filing window. Resubmit with proof of original timely submission if available.",
-    },
-    # ---- Prior authorization ----
-    "97": {
-        "category": "prior_auth",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Prior authorization number", "Auth approval letter"],
-        "incorrect_items": [],
-        "confidence": 0.95,
-        "reasoning": "Service requires prior authorization. Verify auth exists; attach auth number or request retro-auth.",
-    },
-    "96": {
-        "category": "prior_auth",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Prior authorization documentation"],
-        "incorrect_items": [],
-        "confidence": 0.90,
-        "reasoning": "Non-covered charge or missing auth. Review plan exclusions and auth requirements.",
-    },
-    "167": {
-        "category": "prior_auth",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Prior authorization for out-of-network provider"],
-        "incorrect_items": [],
-        "confidence": 0.90,
-        "reasoning": "Out-of-network service. Verify credentialing and check gap exception eligibility.",
-    },
-    "252": {
-        "category": "prior_auth",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Authorization number", "Retro-authorization request"],
-        "incorrect_items": [],
-        "confidence": 0.95,
-        "reasoning": "Service performed without required authorization. Request retro-auth and appeal.",
-    },
-    # ---- Medical necessity ----
-    "50": {
-        "category": "medical_necessity",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Physician letter of medical necessity", "Clinical notes supporting diagnosis"],
-        "incorrect_items": [],
-        "confidence": 0.90,
-        "reasoning": "Payer determined service not medically necessary. Appeal with clinical documentation.",
-    },
-    "55": {
-        "category": "medical_necessity",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Medical necessity documentation", "Diagnostic test results"],
-        "incorrect_items": [],
-        "confidence": 0.90,
-        "reasoning": "Procedure not medically necessary per payer policy. Appeal with supporting clinical evidence.",
-    },
-    "170": {
-        "category": "medical_necessity",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Medical necessity documentation"],
-        "incorrect_items": [],
-        "confidence": 0.85,
-        "reasoning": "Payment adjusted for medical necessity reasons. Appeal with clinical justification.",
-    },
-    # ---- Coding errors ----
-    "4": {
-        "category": "coding_error",
-        "action": "resubmit",
-        "correction_possible": True,
-        "missing_items": [],
-        "incorrect_items": ["Service dates on claim", "Procedure or diagnosis code mismatch"],
-        "confidence": 0.95,
-        "reasoning": "Service date or code inconsistency. Correct and resubmit — do not appeal coding errors.",
-    },
-    "11": {
-        "category": "coding_error",
-        "action": "resubmit",
-        "correction_possible": True,
-        "missing_items": [],
-        "incorrect_items": ["Diagnosis code specificity", "ICD-10 code selection"],
-        "confidence": 0.95,
-        "reasoning": "Diagnosis inconsistent with procedure. Verify ICD-10 specificity and resubmit.",
-    },
-    "16": {
-        "category": "coding_error",
-        "action": "resubmit",
-        "correction_possible": True,
-        "missing_items": ["Missing or incomplete claim field (see RARC for specific field)"],
-        "incorrect_items": [],
-        "confidence": 0.95,
-        "reasoning": "Claim missing required information. Identify missing field from RARC code and resubmit.",
-    },
-    "22": {
-        "category": "coding_error",
-        "action": "resubmit",
-        "correction_possible": True,
-        "missing_items": [],
-        "incorrect_items": ["Coordination of benefits — primary payer EOB required"],
-        "confidence": 0.90,
-        "reasoning": "COB issue. Attach primary payer EOB and resubmit to secondary.",
-    },
-    "B7": {
-        "category": "coding_error",
-        "action": "resubmit",
-        "correction_possible": True,
-        "missing_items": [],
-        "incorrect_items": ["Provider not credentialed for this procedure or place of service"],
-        "confidence": 0.90,
-        "reasoning": "Provider credentialing issue. Verify provider enrollment and resubmit.",
-    },
-    # ---- Duplicate claim ----
-    "18": {
-        "category": "duplicate_claim",
-        "action": "write_off",
-        "correction_possible": False,
-        "missing_items": [],
-        "incorrect_items": ["Duplicate submission — original claim already adjudicated"],
-        "confidence": 0.95,
-        "reasoning": "Duplicate of previously adjudicated claim. Verify original claim status; write off if already paid.",
-    },
-    # ---- Eligibility ----
-    "27": {
-        "category": "eligibility",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Eligibility verification at date of service"],
-        "incorrect_items": [],
-        "confidence": 0.90,
-        "reasoning": "Insurance not in effect on date of service. Verify coverage dates and appeal if eligible.",
-    },
-    "1": {
-        "category": "eligibility",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Deductible/copay documentation", "Patient eligibility verification"],
-        "incorrect_items": [],
-        "confidence": 0.85,
-        "reasoning": "Patient deductible or co-insurance applies. Verify patient responsibility and appeal if incorrect.",
-    },
-    # ---- Coordination of benefits ----
-    "119": {
-        "category": "coordination_of_benefits",
-        "action": "appeal",
-        "correction_possible": True,
-        "missing_items": ["Benefit maximum documentation", "Accumulator verification"],
-        "incorrect_items": [],
-        "confidence": 0.85,
-        "reasoning": "Benefit maximum reached. Verify accumulator and document medical necessity for exception.",
-    },
-}
-
-_DEFAULT_RULE = {
-    "category": "other",
-    "action": "appeal",
-    "correction_possible": True,
-    "missing_items": ["Supporting documentation per payer requirements"],
-    "incorrect_items": [],
-    "confidence": 0.70,
-    "reasoning": "CARC code not in standard lookup — defaulting to appeal. Manual review recommended.",
-}
-
-
-# ------------------------------------------------------------------ #
-# Rule-based analysis
-# ------------------------------------------------------------------ #
-
-def _rule_based_analysis(state: DenialWorkflowState) -> DenialAnalysis:
+def _categorize_from_eob(major_code: str, major_desc: str, minor_desc: str, summary: str) -> str:
     """
-    Derives DenialAnalysis deterministically from CARC/RARC codes.
+    Derive denial_category from EOB descriptions.
+    This replaces the static CARC rules table — the EOB tells us
+    what type of denial it is, in the payer's own words.
+    """
+    desc_combined = f"{major_desc} {minor_desc} {summary}".lower()
 
-    No LLM call — fast, free, and consistent across identical denial codes.
-    For unknown/complex CARC codes the evidence_check_agent (LLM call 1)
-    will add clinical context on top of this base analysis.
+    if any(kw in desc_combined for kw in [
+        "timely", "filing limit", "filing deadline",
+    ]):
+        return "timely_filing"
+
+    if any(kw in desc_combined for kw in [
+        "medical necessity", "not medically necessary", "not deemed",
+        "level of service", "experimental",
+    ]):
+        return "medical_necessity"
+
+    if any(kw in desc_combined for kw in [
+        "authorization", "precertification", "auth", "pre-approval",
+    ]):
+        return "prior_auth"
+
+    if any(kw in desc_combined for kw in [
+        "duplicate", "previously submitted", "already adjudicated",
+    ]):
+        return "duplicate_claim"
+
+    if any(kw in desc_combined for kw in [
+        "invalid code", "coding error", "incorrect code", "modifier",
+        "invalid procedure", "non-specific diagnosis", "provider identifier",
+        "npi", "billing error", "lacks information",
+    ]):
+        return "coding_error"
+
+    if any(kw in desc_combined for kw in [
+        "eligibility", "not eligible", "coverage terminated",
+        "not insured", "not enrolled",
+    ]):
+        return "eligibility"
+
+    if any(kw in desc_combined for kw in [
+        "coordination", "other payer", "cob", "primary payer",
+    ]):
+        return "coordination_of_benefits"
+
+    if any(kw in desc_combined for kw in [
+        "attachment", "documentation required", "additional documentation",
+        "medical record", "operative report", "missing patient",
+    ]):
+        return "other"  # documentation deficiency — not a clinical denial
+
+    return "other"
+
+
+def _determine_action_from_eob(category: str, summary: str) -> str:
+    """
+    Determine recommended action based on denial category and what's missing.
+    The SOP provides the detailed steps; this just picks the path.
+    """
+    s = summary.lower()
+
+    # Missing documentation → resubmit with the missing document
+    if any(kw in s for kw in [
+        "missing medical record", "missing operative", "missing pathology",
+        "missing clinical", "missing documentation",
+    ]):
+        return "resubmit"
+
+    # Missing auth/reference → resubmit with the auth number
+    if any(kw in s for kw in [
+        "missing authorization", "missing auth", "missing reference",
+    ]):
+        return "resubmit"
+
+    # Missing provider info → resubmit with corrected claim
+    if any(kw in s for kw in [
+        "missing provider", "missing npi", "provider identifier",
+    ]):
+        return "resubmit"
+
+    # Category-based fallback
+    if category == "medical_necessity":
+        return "appeal"
+    if category == "timely_filing":
+        return "appeal"  # need to appeal with proof of timely submission
+    if category == "prior_auth":
+        return "appeal"  # retro-auth request + appeal
+    if category == "duplicate_claim":
+        return "resubmit"  # resubmit as replacement
+    if category == "coding_error":
+        return "resubmit"
+    if category == "eligibility":
+        return "resubmit"
+
+    return "appeal"  # default
+
+
+# ------------------------------------------------------------------ #
+# Main analysis — driven by EOB + SOP
+# ------------------------------------------------------------------ #
+
+def _analyze_from_eob(state: DenialWorkflowState) -> DenialAnalysis:
+    """
+    Build DenialAnalysis entirely from EOB denial detail + payer SOP.
+    No static rules table — the EOB is the source of truth.
     """
     claim = state.claim
-    carc = str(claim.carc_code).strip().upper()
+    enriched = state.enriched_data
+    eob_detail = enriched.eob_data.denial_detail
 
-    rule = _CARC_RULES.get(carc, _DEFAULT_RULE)
+    # Category from EOB descriptions
+    category = _categorize_from_eob(
+        eob_detail.major_code,
+        eob_detail.major_description,
+        eob_detail.minor_description,
+        eob_detail.missing_summary,
+    )
 
-    carc_desc = _get_carc_description(carc)
-    rarc_desc = _get_rarc_description(claim.rarc_code)
+    # Action from EOB summary
+    action = _determine_action_from_eob(category, eob_detail.missing_summary)
 
-    # Refine action based on claim-level signals from intake agent
-    action = rule["action"]
+    # Refine action based on claim-level signals
     if claim.appealable is False and claim.rebillable is False:
         action = "write_off"
-    elif rule["action"] == "resubmit" and claim.rebillable is False:
+    elif action == "resubmit" and claim.rebillable is False:
         action = "appeal"
-    elif rule["action"] == "appeal" and claim.appealable is False:
+    elif action == "appeal" and claim.appealable is False:
         action = "resubmit"
+
+    # Root cause — directly from EOB (payer's own words)
+    root_cause = (
+        f"Denial {eob_detail.major_code}: {eob_detail.major_description}. "
+        f"Specific issue ({eob_detail.minor_code}): {eob_detail.minor_description}. "
+        f"Action required: {eob_detail.missing_summary}. "
+        f"Artifact to be retrieved from {eob_detail.artifact_source}"
+        f"{' or ' + eob_detail.artifact_source_fallback if eob_detail.artifact_source_fallback else ''}."
+    )
+
+    # Missing items — from EOB
+    missing_items = [
+        f"{eob_detail.missing_summary} (source: {eob_detail.artifact_source})"
+    ]
+
+    # Enrich with SOP guidance if available
+    sop_context = ""
+    if enriched and enriched.sop_results:
+        sop_context = enriched.sop_results[0].content_snippet[:300]
+        # Check if SOP mentions specific steps for this code
+        if eob_detail.minor_code.lower() in sop_context.lower():
+            root_cause += f" Payer SOP has specific resolution steps for {eob_detail.minor_code}."
+
+    # CARC/RARC descriptions — directly from EOB GLOSSARY
+    carc_desc = f"{eob_detail.major_code}: {eob_detail.major_description}"
+    rarc_desc = f"{eob_detail.minor_code}: {eob_detail.minor_description}" if eob_detail.minor_code else "N/A"
+
+    reasoning = (
+        f"Denial analysis based on EOB from {claim.payer_name or claim.payer_id}. "
+        f"{eob_detail.major_code} indicates {eob_detail.major_description.split('.')[0].lower()}. "
+        f"{eob_detail.minor_code} specifies: {eob_detail.minor_description.split('.')[0].lower()}. "
+        f"Resolution: {action} with {eob_detail.missing_summary.lower()} "
+        f"retrieved from {eob_detail.artifact_source}."
+    )
 
     return DenialAnalysis(
         claim_id=claim.claim_id,
-        root_cause=f"{rule['reasoning']}",
+        root_cause=root_cause,
         carc_interpretation=carc_desc,
         rarc_interpretation=rarc_desc,
-        missing_items=rule["missing_items"],
-        incorrect_items=rule["incorrect_items"],
-        correction_possible=rule["correction_possible"] and action != "write_off",
+        missing_items=missing_items,
+        incorrect_items=[],
+        correction_possible=action in ("resubmit", "both"),
         recommended_action=action,          # type: ignore[arg-type]
-        confidence_score=rule["confidence"],
-        reasoning=rule["reasoning"],
-        denial_category=rule["category"],   # type: ignore[arg-type]
+        confidence_score=0.90,              # high confidence — based on payer's own EOB
+        reasoning=reasoning,
+        denial_category=category,           # type: ignore[arg-type]
     )
 
 
@@ -298,33 +221,53 @@ def _rule_based_analysis(state: DenialWorkflowState) -> DenialAnalysis:
 
 def analysis_agent(state: DenialWorkflowState) -> DenialWorkflowState:
     """
-    LangGraph node: Denial Analysis Agent.
+    LangGraph node: Denial Analysis.
 
-    Pure rule-based — no LLM. Maps CARC code to:
-      - denial_category (timely_filing, prior_auth, coding_error, etc.)
-      - recommended_action (resubmit, appeal, both, write_off)
-      - missing_items and incorrect_items checklists
-      - confidence_score
-
-    LLM reasoning is added in the next stage (evidence_check_agent).
-
-    Args:
-        state: Workflow state with enriched_data populated.
-
-    Returns:
-        Updated state with denial_analysis and routing_decision set.
+    Driven by EOB (source of truth) + payer SOP.
+    If no EOB available → claim is flagged and skipped.
     """
     start = time.perf_counter()
     claim = state.claim
+    enriched = state.enriched_data
 
     bind_claim_context(claim.claim_id, NODE_NAME, state.run_id)
-    logger.info("Analysis agent starting", claim_id=claim.claim_id, carc=claim.carc_code)
+    logger.info("Analysis agent starting", claim_id=claim.claim_id)
 
     state.current_node = NODE_NAME
     state.add_audit(NODE_NAME, "started")
 
     try:
-        analysis = _rule_based_analysis(state)
+        # ── Check EOB availability — source of truth ──────────
+        has_eob = (
+            enriched
+            and enriched.eob_data
+            and enriched.eob_data.eob_available
+            and enriched.eob_data.denial_detail
+        )
+
+        if not has_eob:
+            # No EOB → flag and skip this claim
+            reason = "EOB not available — cannot determine accurate denial root cause"
+            if enriched and enriched.eob_data:
+                reason = f"EOB file not found: {enriched.eob_data.raw_text_excerpt[:100]}"
+
+            logger.warning(
+                "Claim skipped — no EOB available",
+                claim_id=claim.claim_id,
+                reason=reason,
+            )
+            state.add_error(f"SKIPPED: {reason}")
+            state.add_audit(
+                NODE_NAME, "skipped",
+                details=reason,
+            )
+            # Set minimal analysis so downstream agents know this was skipped
+            state.routing_decision = ""
+            state.is_complete = True
+            return state
+
+        # ── Analyze from EOB + SOP ────────────────────────────
+        analysis = _analyze_from_eob(state)
 
         state.denial_analysis = analysis
         state.routing_decision = analysis.recommended_action
@@ -337,23 +280,27 @@ def analysis_agent(state: DenialWorkflowState) -> DenialWorkflowState:
                 f"Action: {analysis.recommended_action} | "
                 f"Category: {analysis.denial_category} | "
                 f"Confidence: {analysis.confidence_score:.2f} | "
-                f"Missing items: {len(analysis.missing_items)}"
+                f"Root cause: {analysis.missing_items[0] if analysis.missing_items else 'N/A'} | "
+                f"Data source: EOB"
             ),
             duration_ms=duration_ms,
         )
         logger.info(
-            "Analysis agent complete",
+            "Analysis complete",
             claim_id=claim.claim_id,
             recommended_action=analysis.recommended_action,
             denial_category=analysis.denial_category,
             confidence=analysis.confidence_score,
+            missing_summary=enriched.eob_data.denial_detail.missing_summary,
+            data_source="EOB",
             duration_ms=round(duration_ms, 2),
         )
 
     except Exception as exc:
-        state.add_error(f"Analysis agent failed: {exc}")
+        state.add_error(f"Analysis failed: {exc}")
         state.add_audit(NODE_NAME, "failed", details=str(exc))
-        state.routing_decision = "appeal"
+        # Don't guess — flag the error
+        state.routing_decision = ""
         logger.error("Analysis agent failed", claim_id=claim.claim_id, error=str(exc))
 
     return state

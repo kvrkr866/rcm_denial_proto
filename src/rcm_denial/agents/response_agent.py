@@ -71,7 +71,23 @@ def _build_response_prompt(state: DenialWorkflowState) -> str:
 
     sop_steps = "Follow standard denial response procedures"
     if enriched and enriched.sop_results:
-        sop_steps = enriched.sop_results[0].content_snippet[:500]
+        # Combine top SOP results for richer context
+        sop_parts = []
+        for sop in enriched.sop_results[:3]:
+            sop_parts.append(sop.content_snippet[:400])
+        sop_steps = "\n---\n".join(sop_parts)
+
+    # EOB denial detail — source of truth for what's missing
+    eob_denial_context = ""
+    if enriched and enriched.eob_data and enriched.eob_data.denial_detail:
+        d = enriched.eob_data.denial_detail
+        eob_denial_context = (
+            f"\nDENIAL DETAIL (from EOB — source of truth):\n"
+            f"- Denial code: {d.major_code} — {d.major_description}\n"
+            f"- Remark code: {d.minor_code} — {d.minor_description}\n"
+            f"- What is missing: {d.missing_summary}\n"
+            f"- Where to retrieve: {d.artifact_source} (fallback: {d.artifact_source_fallback})\n"
+        )
 
     key_arguments = evidence.key_arguments if evidence else []
     evidence_gaps = evidence.evidence_gaps if evidence else []
@@ -139,10 +155,15 @@ PAYER INFORMATION:
 - Appeal deadline: {appeal_deadline_days} days from denial date ({claim.denial_date})
 - Billing guidelines: {billing_guidelines}
 
-RELEVANT SOP PROCEDURE:
+RELEVANT SOP PROCEDURE (from payer-specific knowledge base):
 {sop_steps}
-
+{eob_denial_context}
 TASK: {instructions}
+
+IMPORTANT: If documents are not available, clearly indicate in the response:
+- For missing artifacts: state "TBD: to be retrieved from [EHR/PMS]" in the relevant field
+- Do NOT fabricate clinical details or authorization numbers
+- Reference only what is documented in the evidence above
 
 For CorrectionPlan: claim_id must be "{claim.claim_id}", plan_type="{action if action in ('resubmission','appeal','both') else 'appeal'}"
 For AppealLetter: recipient_name="{payer_name} Appeals Department", date_of_letter="{date.today()}"

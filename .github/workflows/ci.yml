@@ -1,10 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+  # Disabled during demo phase — enable for production
+  # push:
+  #   branches: [main, develop]
+  # pull_request:
+  #   branches: [main]
+  workflow_dispatch:   # manual trigger only
 
 jobs:
   lint:

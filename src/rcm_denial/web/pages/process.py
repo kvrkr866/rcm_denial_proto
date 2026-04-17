@@ -441,7 +441,7 @@ async def _run_batch(
                         "payer_id": rc.payer_id,
                         "carc_code": rc.carc_code,
                         "billed_amount": str(rc.billed_amount),
-                    })
+                    }, state)
             pending_count.set_text(f"{len(remaining)} claims")
 
             # Update center panel — show current claim + stepper

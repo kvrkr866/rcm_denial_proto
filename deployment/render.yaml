@@ -1,0 +1,30 @@
+# Render.com — Blueprint for one-click deploy
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: rcm-denial-management
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: rcm-denial web --host 0.0.0.0 --port 10000
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: OPENAI_API_KEY
+        sync: false    # set manually in Render dashboard
+      - key: WEB_AUTH_ENABLED
+        value: "true"
+      - key: WEB_AUTH_SECRET
+        generateValue: true
+      - key: WEB_AUTH_USERS
+        sync: false    # set manually: admin:yourpassword
+      - key: ENV
+        value: production
+      - key: DATABASE_TYPE
+        value: sqlite
+    disk:
+      name: rcm-data
+      mountPath: /app/data
+      sizeGB: 1
+    healthCheckPath: /
+    plan: free

@@ -38,6 +38,11 @@ This system automates the entire denial management workflow using a **multi-agen
 
 ## System Architecture
 
+> Full interactive diagram: [docs/architecture_diagram.md](docs/architecture_diagram.md) (Mermaid, renders on GitHub)
+> PNG specification for draw.io: [docs/architecture_png_spec.md](docs/architecture_png_spec.md)
+>
+> **Legend:** Solid = demo-ready | Dashed/orange = production roadmap
+
 ```
  EXTERNAL DATA SOURCES                    AI PIPELINE (LangGraph)                         OUTPUTS & ACTIONS
  =====================                    =======================                         =================
@@ -177,7 +182,7 @@ This system automates the entire denial management workflow using a **multi-agen
 - **Web UI** -- NiceGUI browser interface with live pipeline progress, review queue, stats dashboard
 - **Docker deployment** -- one-command `docker compose up` for app + full monitoring stack
 
-For detailed technical architecture, design rationale, and implementation details see **[TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)**.
+For detailed technical architecture, design rationale, and implementation details see **[TECHNICAL_ARCHITECTURE.md](deployment/TECHNICAL_ARCHITECTURE.md)**.
 
 ---
 
@@ -339,9 +344,9 @@ output/CLM-33001/
 
 ### Sharing the demo
 
-See **[DEPLOYMENT.md](DEPLOYMENT.md)** for deployment options:
-- **Google Cloud** (recommended) -- $300 free credits, 4GB RAM, full stack with Grafana. See **[DEPLOY_GOOGLE_CLOUD.md](DEPLOY_GOOGLE_CLOUD.md)**
-- **Oracle Cloud Always Free** -- 4 CPU + 24GB RAM, $0 forever (if ARM available in your region). See **[DEPLOY_ORACLE_CLOUD.md](DEPLOY_ORACLE_CLOUD.md)**
+See **[DEPLOYMENT.md](deployment/DEPLOYMENT.md)** for deployment options:
+- **Google Cloud** (recommended) -- $300 free credits, 4GB RAM, full stack with Grafana. See **[DEPLOY_GOOGLE_CLOUD.md](deployment/DEPLOY_GOOGLE_CLOUD.md)**
+- **Oracle Cloud Always Free** -- 4 CPU + 24GB RAM, $0 forever (if ARM available in your region). See **[DEPLOY_ORACLE_CLOUD.md](deployment/DEPLOY_ORACLE_CLOUD.md)**
 - **ngrok** (5 min) -- share from your machine via public URL
 - **Railway.app** (10 min) -- git push to deploy, free tier
 - **Render.com** (10 min) -- Docker deploy, free tier
@@ -391,7 +396,7 @@ rcm-denial db info
 rcm-denial db migrate-to-postgres
 ```
 
-For the full CLI reference with all options and flags, see **[TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)**.
+For the full CLI reference with all options and flags, see **[TECHNICAL_ARCHITECTURE.md](deployment/TECHNICAL_ARCHITECTURE.md)**.
 
 ---
 
@@ -410,7 +415,7 @@ Copy `.env.example` to `.env` and set your values. Key variables:
 | `DATABASE_TYPE` | `sqlite` | `sqlite` or `postgresql` |
 | `SUBMISSION_ADAPTER` | `mock` | `mock` / `availity_api` / `rpa_portal` / `edi_837` |
 
-For the complete configuration reference (40+ variables), see **[TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)**.
+For the complete configuration reference (40+ variables), see **[TECHNICAL_ARCHITECTURE.md](deployment/TECHNICAL_ARCHITECTURE.md)**.
 
 ---
 
@@ -419,5 +424,5 @@ For the complete configuration reference (40+ variables), see **[TECHNICAL_ARCHI
 | Document | What It Covers |
 |----------|---------------|
 | **[README.md](README.md)** (this file) | What, why, setup, run, demo |
-| **[TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)** | Agentic AI features, design rationale, pipeline architecture, LLM/RAG/tool details, memory/state, HITL design, eval system, observability, data models, project structure, full CLI reference, config reference, test suite, production hardening, technology stack, future improvements |
-| **[DEPLOYMENT.md](DEPLOYMENT.md)** | Docker, Railway, Render, AWS, GCP deployment guides + demo script |
+| **[TECHNICAL_ARCHITECTURE.md](deployment/TECHNICAL_ARCHITECTURE.md)** | Agentic AI features, design rationale, pipeline architecture, LLM/RAG/tool details, memory/state, HITL design, eval system, observability, data models, project structure, full CLI reference, config reference, test suite, production hardening, technology stack, future improvements |
+| **[DEPLOYMENT.md](deployment/DEPLOYMENT.md)** | Docker, Railway, Render, AWS, GCP deployment guides + demo script |

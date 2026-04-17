@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python scripts/generate_claims_csv.py)",
+      "Bash(.venv/bin/python -c \"\nimport csv\nfrom pathlib import Path\n\ncsv_path = Path\\('data/claims.csv'\\)\nwith open\\(csv_path\\) as f:\n    reader = csv.DictReader\\(f\\)\n    rows = list\\(reader\\)\n\nprint\\(f'Total rows   : {len\\(rows\\)}'\\)\nprint\\(f'Total columns: {len\\(reader.fieldnames\\)}'\\)\nprint\\(\\)\nprint\\('Columns:'\\)\nfor i, col in enumerate\\(reader.fieldnames, 1\\):\n    print\\(f'  {i:2}. {col}'\\)\nprint\\(\\)\nprint\\('Claim IDs in CSV:'\\)\nfor r in rows:\n    print\\(f'  {r[\\\\\"rec_id\\\\\"]:6} | {r[\\\\\"patient_name\\\\\"]:20} | {r[\\\\\"payer\\\\\"]:30} | {r[\\\\\"denial_code\\\\\"]:8} | {r[\\\\\"priority_label\\\\\"]:6} | days_to_deadline: {r[\\\\\"days_to_deadline\\\\\"]}'\\)\n\")",
+      "Bash(.venv/bin/python -m rcm_denial.main intake-report --batch-id wire-test-001)",
+      "Bash(.venv/bin/python -m rcm_denial.main intake-report --batch-id error-test-001)",
+      "Bash(__NEW_LINE_8f9a0687bf94fb12__ sed:*)",
+      "Bash(python:*)",
+      "Bash(find /mnt/e/rcm_study/rcm_denial_proto -name \"*.pyc\" -path \"*/web/*\" -delete)",
+      "Bash(find /mnt/e/rcm_study/rcm_denial_proto -name \"__pycache__\" -path \"*/web/*\" -exec rm -rf {} +)",
+      "Bash(pip install:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(docker build:*)",
+      "Bash(docker run:*)",
+      "Bash(docker compose:*)",
+      "Bash(echo '=== Root files ===' ls /mnt/e/rcm_study/rcm_denial_proto/*.md /mnt/e/rcm_study/rcm_denial_proto/*.json /mnt/e/rcm_study/rcm_denial_proto/*.yaml /mnt/e/rcm_study/rcm_denial_proto/*.svg /mnt/e/rcm_study/rcm_denial_proto/*.txt)",
+      "Bash(sed \"s|/mnt/e/rcm_study/rcm_denial_proto/||\" __NEW_LINE_1979dea4be46a084__ echo echo '=== Deployment folder ===' ls /mnt/e/rcm_study/rcm_denial_proto/deployment/ 2)",
+      "Bash(/dev/null __NEW_LINE_1979dea4be46a084__ echo echo '=== README links check ===' grep -n deployment/ /mnt/e/rcm_study/rcm_denial_proto/README.md)"
+    ]
+  }
+}
